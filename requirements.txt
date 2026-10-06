@@ -1,0 +1,21 @@
+# ProvaFair Requirements
+# Python 3.10+ recommended
+
+# --- Frontend & UI ---
+streamlit>=1.30.0
+
+# --- Quantum Simulation ---
+qiskit>=1.0.0
+qiskit-aer>=0.14.0
+
+# --- Data Handling & Visualization ---
+numpy>=1.24.0
+pandas>=2.0.0
+plotly>=5.18.0
+
+# --- Standard Libraries ---
+# (sqlite3, json, random, and math are built into Python, no installation needed)
+
+fastapi>=0.110.0
+uvicorn>=0.28.0
+requests>=2.31.0
