@@ -64,3 +64,7 @@ Open your browser and navigate to `http://localhost:8501` to view the prototype.
 *   [Your Name/Teammate 1] - Quantum Logic & Qiskit Integration
 *   [Teammate 2] - Streamlit UI & Data Visualization
 *   [Teammate 3] - Pitch & System Architecture
+
+//Run backend
+Inside backend folder
+uvicorn main:app --reload
