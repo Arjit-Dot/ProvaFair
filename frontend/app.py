@@ -11,6 +11,8 @@ pages = [
     st.Page("views/verify.py", title="Verify a draw"),
     st.Page("views/ledger.py", title="Ledger"),
     st.Page("views/randomness.py", title="Randomness tests"),
-    st.Page("views/insider_attack.py", title="Insider attack"),
 ]
+show_attack = st.sidebar.toggle("Insider attack page", value=True, key="ia_show")
+if show_attack:
+    pages.append(st.Page("views/insider_attack.py", title="Insider attack"))
 st.navigation(pages, position="top").run()

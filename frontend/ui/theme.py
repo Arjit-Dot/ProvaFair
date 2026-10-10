@@ -11,6 +11,7 @@ CSS = """
 :root{ --void:#050816; --ink:#e9f3ff; --muted:#8a9bb8; --photon:#7cf0ff; --photon-dim:rgba(124,240,255,.14);
   --alarm:#ff4d6d; --alarm-dim:rgba(255,77,109,.14); --amber:#ffc15e; --amber-dim:rgba(255,193,94,.14);
   --glass:rgba(10,16,38,.66); --edge:rgba(160,200,255,.16); }
+.stAppDeployButton, [data-testid="stAppDeployButton"]{ display:none !important; }
 html, body, .stApp{ font-family:'Space Grotesk',sans-serif; color:var(--ink); }
 .stApp{ background:transparent !important; }
 header[data-testid="stHeader"]{ background:rgba(5,8,22,.35) !important; backdrop-filter:blur(10px); }

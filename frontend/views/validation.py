@@ -32,11 +32,11 @@ slot.markdown(panel(
     ss.val_fresh, "", 380), unsafe_allow_html=True)
 
 l, r = st.columns(2)
-with l:
+with r:
     st.markdown(panel(f'<div class="pf-title fx" style="--i:0">Quantum mode</div>{stat_cards(q, "quantum", "q")}'
                       f'<div class="pf-note fx" style="--i:5;margin-top:.8rem">Every run lands near the 2.83 maximum.</div>',
                       ss.val_fresh, "ok", 230), unsafe_allow_html=True)
-with r:
+with l:
     st.markdown(panel(f'<div class="pf-title fx" style="--i:0">Classical mode</div>{stat_cards(c, "classical", "c")}'
                       f'<div class="pf-note fx" style="--i:5;margin-top:.8rem">Centred on 2.0. {c["naive_above_2"]} runs scored above 2 '
                       f'by chance, which is why the 3\u03c3 margin is required.</div>', ss.val_fresh, "bad", 230),

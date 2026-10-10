@@ -1,4 +1,5 @@
 """ProvaFair evidence API. Mount with:  app.include_router(api_v2.router)"""
+import secrets
 import uuid
 from typing import Literal, Optional
 
@@ -121,20 +122,21 @@ def validation(runs: int = 500, refresh: bool = False):
 @router.post("/insider-attack")
 def insider_attack(rounds: int = 5, pool_size: int = 100, num_winners: int = 4):
     """Attacker knows the seed. Predicts a seeded server, then tries the same on certified quantum draws."""
-    victim = ClassicalServer(SEED)           # honest-looking PRNG lottery
-    attacker = ClassicalServer(SEED)         # attacker replays it from the stolen seed
+    seed = secrets.randbelow(2**31)          # fresh seed per run so each attack shows different draws
+    victim = ClassicalServer(seed)           # honest-looking PRNG lottery
+    attacker = ClassicalServer(seed)         # attacker replays it from the stolen seed
     classical, quantum = [], []
     for r in range(1, rounds + 1):
         actual = bits_to_winners(victim.bits(4096), pool_size, num_winners)
         pred = bits_to_winners(attacker.bits(4096), pool_size, num_winners)
         classical.append({"round": r, "actual": actual, "predicted": pred, "match": actual == pred})
-    attacker = ClassicalServer(SEED)         # same attack against certified quantum draws
+    attacker = ClassicalServer(seed)         # same attack against certified quantum draws
     for r in range(1, rounds + 1):
         chsh, bits = ch.run_quantum_chsh()
         actual = bits_to_winners(bits, pool_size, num_winners)
         pred = bits_to_winners(attacker.bits(4096), pool_size, num_winners)
         quantum.append({"round": r, "actual": actual, "predicted": pred, "match": actual == pred,
                         "S": chsh["S"], "certified": chsh["certified"]})
-    return {"seed": SEED, "classical": classical, "quantum": quantum,
+    return {"seed": seed, "classical": classical, "quantum": quantum,
             "classical_hits": sum(x["match"] for x in classical),
             "quantum_hits": sum(x["match"] for x in quantum)}
