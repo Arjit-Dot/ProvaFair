@@ -52,19 +52,21 @@ pip install -r requirements.txt
 ```
 *(Ensure you have Qiskit and Streamlit included in your `requirements.txt`)*
 
-**3. Run the Streamlit app**
+**3. Start the backend** (in a terminal)
 ```bash
-streamlit run app.py
+cd backend
+uvicorn main:app --reload --port 8000
 ```
 
-**4. View the App**
-Open your browser and navigate to `http://localhost:8501` to view the prototype.
+**4. Start the frontend** (in a second terminal, from the repository root)
+```bash
+streamlit run frontend/app.py
+```
+
+Open `http://localhost:8501` to view the app. The frontend calls the backend at
+`http://127.0.0.1:8000`; the backend exposes its UI endpoints under `/v2`.
 
 ## 🤝 Team
 *   [Your Name/Teammate 1] - Quantum Logic & Qiskit Integration
 *   [Teammate 2] - Streamlit UI & Data Visualization
 *   [Teammate 3] - Pitch & System Architecture
-
-//Run backend
-Inside backend folder
-uvicorn main:app --reload

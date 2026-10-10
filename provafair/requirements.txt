@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+qiskit
+qiskit-aer
+matplotlib
+pylatexenc
+numpy
+requests
+streamlit>=1.46

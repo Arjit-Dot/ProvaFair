@@ -7,6 +7,7 @@ import uuid
 from quantum.chsh_engine import run_chsh_test, extract_quantum_random_numbers
 from quantum.rigged_engine import run_rigged_test, generate_rigged_numbers
 from ledger.audit_db import init_db, record_draw, get_draw
+import api_v2
 
 app = FastAPI(title="ProvaFair API", description="Quantum-secured lottery backend")
 
@@ -17,6 +18,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(api_v2.router)
 
 @app.on_event("startup")
 def startup_event():
