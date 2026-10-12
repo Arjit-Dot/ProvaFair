@@ -39,10 +39,13 @@ elif ss.vf:
         return f'<span class="pill {"ok" if good else "bad"}">{e(text)}</span> {e(label)}'
     win = chips(d["winners"], start=3) if d["winners"] else '<div class="pf-note fx" style="--i:3">No numbers were released (draw blocked).</div>'
     body = f"""
-    <div class="pf-verdict {'ok' if ok_all else 'bad'} fx" style="--i:0"><b>{'RECORD AUTHENTIC' if ok_all else 'RECORD FAILS CHECKS'}</b>
-    <span>{e(d['draw_id'])} | {e(d['event_name'])} | {e(d['timestamp'])}</span></div>
+    <div class="pf-duo fx" style="--i:0">
+      <div class="pf-card draw {'ok' if cert else 'bad'}"><small>Draw result</small><i>{'&#10003;' if cert else '&#10005;'}</i><b>{'DRAW VERIFIED' if cert else 'DRAW BLOCKED'}</b><span>{'Not classical: the score beats the classical limit' if cert else 'Could be classical: failed the quantum rule, no numbers released'}</span></div>
+      <div class="pf-card auth {'ok' if ok_all else 'bad'}"><small>Record integrity</small><i>{'&#10003;' if ok_all else '&#9888;'}</i><b>{'AUTHENTIC' if ok_all else 'TAMPERED'}</b><span>{'Hashes and chain are intact' if ok_all else 'Hash or chain check failed'}</span></div>
+    </div>
+    <div class="pf-kv fx" style="--i:0">{e(d['draw_id'])} | {e(d['event_name'])} | {e(d['timestamp'])}</div>
     <div class="fx" style="--i:1">{gauge_svg(d['chsh_score'], d['margin'], cert)}</div>
-    <div class="pf-kv fx" style="--i:2">Status <b>{e(d['status'])}</b> | S <b>{d['chsh_score']} \u00b1 {d['margin']}</b> | shots <b>{d['shots']}</b> | rule re-check <b>{d['rule_recheck']}</b></div>
+    <div class="pf-keyrow fx" style="--i:2"><div>Status<b>{e(d['status'])}</b></div><div>CHSH score S<b>{d['chsh_score']} &plusmn; {d['margin']}</b></div><div>Shots<b>{d['shots']}</b></div><div>Rule re-check<b>{d['rule_recheck']}</b></div></div>
     {win}
     <div class="pf-kv fx" style="--i:5">{row('Own hash recomputes to the stored value', d['hash_ok'], 'MATCH' if d['hash_ok'] else 'MISMATCH')}</div>
     <div class="pf-kv fx" style="--i:6">{row('Link to the previous entry is correct', d['link_ok'], 'LINKED' if d['link_ok'] else 'BROKEN')}</div>

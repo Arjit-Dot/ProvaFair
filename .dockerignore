@@ -1,0 +1,8 @@
+env/
+.env/
+*.mp4
+videoProvafair/
+*.pptx
+.git
+__pycache__/
+.DS_Store
