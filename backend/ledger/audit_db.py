@@ -1,9 +1,10 @@
 import os
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from sqlalchemy import create_engine, Column, String, Float, Text
+from typing import Any
+from sqlalchemy import create_engine, Column, String, Float, Text, Integer, DateTime, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.exc import IntegrityError
 
@@ -23,8 +24,20 @@ DATABASE_URL = _resolve_db_url()
 engine = create_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False},
 )
+
+
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
+    cursor.execute("PRAGMA foreign_keys=ON;")
+    cursor.close()
+
+
+event.listen(engine, "connect", _set_sqlite_pragma)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -43,6 +56,7 @@ class Draw(Base):
     receipt_hash = Column(String, nullable=False)
     service_type = Column(String, nullable=False, default="lottery")
     previous_hash = Column(String, nullable=False)
+    ibm_job_id = Column(String, nullable=True, default="SIMULATED")
 
     def to_dict(self) -> dict:
         return {
@@ -55,7 +69,28 @@ class Draw(Base):
             "receipt_hash": self.receipt_hash,
             "service_type": self.service_type,
             "previous_hash": self.previous_hash,
+            "ibm_job_id": self.ibm_job_id or "SIMULATED",
         }
+
+
+class IdempotencyRecord(Base):
+    """SQLAlchemy ORM model storing processed idempotency keys mapped to draw_id and JSON response."""
+    __tablename__ = "idempotency_records"
+
+    key = Column(String, primary_key=True)
+    draw_id = Column(String, nullable=False)
+    response_payload = Column(Text, nullable=False)
+    created_at = Column(String, nullable=False)
+
+
+class ApiUsageLog(Base):
+    """SQLAlchemy ORM model storing API request logs for rate limiting and usage tracking."""
+    __tablename__ = "api_usage_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    api_key = Column(String, nullable=False)
+    endpoint = Column(String, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 def init_db(engine_instance=None):
@@ -73,6 +108,8 @@ def init_db(engine_instance=None):
                     conn.exec_driver_sql("ALTER TABLE draws ADD COLUMN service_type TEXT DEFAULT 'lottery'")
                 if "previous_hash" not in existing_columns:
                     conn.exec_driver_sql("ALTER TABLE draws ADD COLUMN previous_hash TEXT DEFAULT 'GENESIS'")
+                if "ibm_job_id" not in existing_columns:
+                    conn.exec_driver_sql("ALTER TABLE draws ADD COLUMN ibm_job_id TEXT DEFAULT 'SIMULATED'")
                 conn.commit()
         except Exception:
             pass
@@ -86,6 +123,7 @@ def record_draw(
     winners: list[int],
     service_type: str = "lottery",
     previous_hash: str | None = None,
+    ibm_job_id: str | None = "SIMULATED",
 ) -> str:
     """
     Saves the draw data and generates a tamper-evident SHA-256 hash receipt
@@ -123,6 +161,7 @@ def record_draw(
             receipt_hash=receipt_hash,
             service_type=service_type,
             previous_hash=previous_hash,
+            ibm_job_id=ibm_job_id or "SIMULATED",
         )
         session.add(draw)
         session.commit()
@@ -149,7 +188,112 @@ def get_draw(draw_id: str) -> dict | None:
             "receipt_hash": draw.receipt_hash,
             "service_type": draw.service_type,
             "previous_hash": draw.previous_hash,
+            "ibm_job_id": draw.ibm_job_id or "SIMULATED",
         }
+
+
+def get_idempotency_record(key: str) -> dict | None:
+    """
+    Retrieves cached JSON response for a given idempotency key if it exists.
+    """
+    init_db()
+    with SessionLocal() as session:
+        rec = session.query(IdempotencyRecord).filter(IdempotencyRecord.key == key).first()
+        if not rec:
+            return None
+        try:
+            return json.loads(rec.response_payload)
+        except Exception:
+            return None
+
+
+def save_idempotency_record(key: str, draw_id: str, response_payload: dict | Any) -> None:
+    """
+    Saves processed idempotency key with corresponding draw_id and response payload.
+    """
+    init_db()
+    payload_str = json.dumps(response_payload) if not isinstance(response_payload, str) else response_payload
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    with SessionLocal() as session:
+        rec = IdempotencyRecord(
+            key=key,
+            draw_id=draw_id,
+            response_payload=payload_str,
+            created_at=ts,
+        )
+        session.merge(rec)
+        session.commit()
+
+
+def log_api_request(api_key: str, endpoint: str) -> None:
+    """
+    Logs an API request made by a specific api_key to an endpoint.
+    """
+    init_db()
+    with SessionLocal() as session:
+        log_entry = ApiUsageLog(
+            api_key=api_key,
+            endpoint=endpoint,
+            timestamp=datetime.utcnow(),
+        )
+        session.add(log_entry)
+        session.commit()
+
+
+def count_recent_requests(api_key: str, window_seconds: int = 60) -> int:
+    """
+    Counts how many requests a specific api_key has made in the last `window_seconds` seconds.
+    """
+    init_db()
+    cutoff = datetime.utcnow() - timedelta(seconds=window_seconds)
+    with SessionLocal() as session:
+        return session.query(ApiUsageLog).filter(
+            ApiUsageLog.api_key == api_key,
+            ApiUsageLog.timestamp >= cutoff,
+        ).count()
+
+
+def calculate_merkle_root(hashes: list[str]) -> str:
+    """
+    Computes the Merkle root of a list of SHA-256 hashes by pairing adjacent hashes,
+    concatenating them, and hashing repeatedly until a single root remains.
+    If the list is odd, duplicates the last hash for the pair.
+    """
+    if not hashes:
+        return ""
+    current = list(hashes)
+    while len(current) > 1:
+        if len(current) % 2 != 0:
+            current.append(current[-1])
+        next_level = []
+        for i in range(0, len(current), 2):
+            combined = current[i] + current[i + 1]
+            next_level.append(hashlib.sha256(combined.encode()).hexdigest())
+        current = next_level
+    return current[0]
+
+
+def get_ledger_merkle_root() -> str | None:
+    """
+    Queries all receipt_hash strings from the draws table in timestamp order,
+    and passes them to calculate_merkle_root. If the database is empty, returns None.
+    """
+    init_db()
+    with SessionLocal() as session:
+        rows = session.query(Draw.receipt_hash).order_by(Draw.timestamp.asc(), Draw.draw_id.asc()).all()
+        if not rows:
+            return None
+        hashes = [r[0] for r in rows]
+        return calculate_merkle_root(hashes)
+
+
+def get_ledger_draw_count() -> int:
+    """
+    Returns the total number of draws recorded in the ledger.
+    """
+    init_db()
+    with SessionLocal() as session:
+        return session.query(Draw).count()
 
 
 if __name__ == "__main__":
