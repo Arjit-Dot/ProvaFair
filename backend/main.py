@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 import uuid
 import requests
+import threading
 
 # Ensure backend directory is in sys.path
 backend_dir = Path(__file__).resolve().parent
@@ -52,6 +53,9 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 PROVA_API_KEY = os.getenv("PROVA_API_KEY", "PROVA-HACK-2026")
 
 
+_rate_limit_lock = threading.Lock()
+
+
 def verify_api_key(
     request: Request,
     api_key: str = Security(api_key_header),
@@ -69,17 +73,18 @@ def verify_api_key(
             detail="Invalid or missing API Key"
         )
 
-    # Rate limiting: max 5 requests per minute (60 seconds)
-    recent_count = count_recent_requests(api_key, window_seconds=60)
-    if recent_count >= 5:
-        raise HTTPException(
-            status_code=429,
-            detail="Rate limit exceeded"
-        )
+    # Rate limiting: max 5 requests per minute (60 seconds) synchronized under lock
+    with _rate_limit_lock:
+        recent_count = count_recent_requests(api_key, window_seconds=60)
+        if recent_count >= 5:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded"
+            )
 
-    # Log usage
-    endpoint = request.url.path if request else "unknown"
-    log_api_request(api_key, endpoint)
+        # Log usage
+        endpoint = request.url.path if request else "unknown"
+        log_api_request(api_key, endpoint)
 
     return api_key
 
@@ -158,6 +163,9 @@ def process_draw_background(
     return response
 
 
+_draw_lock = threading.Lock()
+
+
 @app.post("/draw/quantum", response_model=MultiServiceResponse, dependencies=[Depends(verify_api_key)])
 def api_run_quantum_draw(
     request: MultiServiceRequest,
@@ -171,18 +179,59 @@ def api_run_quantum_draw(
     Supports asynchronous webhook delivery via BackgroundTasks.
     """
     if idempotency_key:
-        cached = get_idempotency_record(idempotency_key)
-        if cached:
-            return MultiServiceResponse(**cached)
+        with _draw_lock:
+            cached = get_idempotency_record(idempotency_key)
+            if cached:
+                return MultiServiceResponse(**cached)
+
+            draw_id = f"DRAW-Q-{uuid.uuid4().hex[:8].upper()}"
+
+            # Extract num_winners from service_params (defaulting to 1) and calculate batches
+            num_winners = int(request.service_params.get("num_winners", 1))
+            batches = calculate_batches(num_winners)
+            print(f"[Quantum Batcher] Slicing {num_winners} circuits into batches: {batches}")
+            
+            # Placeholder values while quantum engine multi-service integration is updated
+            chsh_score = 2.8284
+            status_str = "VERIFIED - TRUE QUANTUM"
+            payload = [1, 2, 3]
+            ibm_job_id = f"ibm-q-job-{uuid.uuid4().hex[:8]}"
+
+            if request.webhook_url:
+                background_tasks.add_task(
+                    process_draw_background,
+                    draw_id=draw_id,
+                    event_name="Quantum Secure Draw",
+                    service_type=request.service_type,
+                    status=status_str,
+                    chsh_score=chsh_score,
+                    payload=payload,
+                    webhook_url=request.webhook_url,
+                    idempotency_key=idempotency_key,
+                    ibm_job_id=ibm_job_id,
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_202_ACCEPTED,
+                    content={"draw_id": draw_id, "status": "QUEUED"},
+                )
+
+            return process_draw_background(
+                draw_id=draw_id,
+                event_name="Quantum Secure Draw",
+                service_type=request.service_type,
+                status=status_str,
+                chsh_score=chsh_score,
+                payload=payload,
+                webhook_url=None,
+                idempotency_key=idempotency_key,
+                ibm_job_id=ibm_job_id,
+            )
 
     draw_id = f"DRAW-Q-{uuid.uuid4().hex[:8].upper()}"
-
-    # Extract num_winners from service_params (defaulting to 1) and calculate batches
     num_winners = int(request.service_params.get("num_winners", 1))
     batches = calculate_batches(num_winners)
     print(f"[Quantum Batcher] Slicing {num_winners} circuits into batches: {batches}")
     
-    # Placeholder values while quantum engine multi-service integration is updated
     chsh_score = 2.8284
     status_str = "VERIFIED - TRUE QUANTUM"
     payload = [1, 2, 3]
@@ -198,7 +247,7 @@ def api_run_quantum_draw(
             chsh_score=chsh_score,
             payload=payload,
             webhook_url=request.webhook_url,
-            idempotency_key=idempotency_key,
+            idempotency_key=None,
             ibm_job_id=ibm_job_id,
         )
         return JSONResponse(
@@ -214,7 +263,7 @@ def api_run_quantum_draw(
         chsh_score=chsh_score,
         payload=payload,
         webhook_url=None,
-        idempotency_key=idempotency_key,
+        idempotency_key=None,
         ibm_job_id=ibm_job_id,
     )
 
@@ -232,13 +281,48 @@ def api_run_rigged_draw(
     Supports asynchronous webhook delivery via BackgroundTasks.
     """
     if idempotency_key:
-        cached = get_idempotency_record(idempotency_key)
-        if cached:
-            return MultiServiceResponse(**cached)
+        with _draw_lock:
+            cached = get_idempotency_record(idempotency_key)
+            if cached:
+                return MultiServiceResponse(**cached)
+
+            draw_id = f"DRAW-R-{uuid.uuid4().hex[:8].upper()}"
+            chsh_score = 1.4142
+            status_str = "REJECTED - CLASSICAL DEVICE DETECTED"
+            payload = [1, 2, 3]
+            ibm_job_id = "SIMULATED"
+
+            if request.webhook_url:
+                background_tasks.add_task(
+                    process_draw_background,
+                    draw_id=draw_id,
+                    event_name="Rigged Demo Draw",
+                    service_type=request.service_type,
+                    status=status_str,
+                    chsh_score=chsh_score,
+                    payload=payload,
+                    webhook_url=request.webhook_url,
+                    idempotency_key=idempotency_key,
+                    ibm_job_id=ibm_job_id,
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_202_ACCEPTED,
+                    content={"draw_id": draw_id, "status": "QUEUED"},
+                )
+
+            return process_draw_background(
+                draw_id=draw_id,
+                event_name="Rigged Demo Draw",
+                service_type=request.service_type,
+                status=status_str,
+                chsh_score=chsh_score,
+                payload=payload,
+                webhook_url=None,
+                idempotency_key=idempotency_key,
+                ibm_job_id=ibm_job_id,
+            )
 
     draw_id = f"DRAW-R-{uuid.uuid4().hex[:8].upper()}"
-    
-    # Placeholder values while quantum engine multi-service integration is updated
     chsh_score = 1.4142
     status_str = "REJECTED - CLASSICAL DEVICE DETECTED"
     payload = [1, 2, 3]
@@ -254,7 +338,7 @@ def api_run_rigged_draw(
             chsh_score=chsh_score,
             payload=payload,
             webhook_url=request.webhook_url,
-            idempotency_key=idempotency_key,
+            idempotency_key=None,
             ibm_job_id=ibm_job_id,
         )
         return JSONResponse(
@@ -270,7 +354,7 @@ def api_run_rigged_draw(
         chsh_score=chsh_score,
         payload=payload,
         webhook_url=None,
-        idempotency_key=idempotency_key,
+        idempotency_key=None,
         ibm_job_id=ibm_job_id,
     )
 

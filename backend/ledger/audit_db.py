@@ -215,14 +215,17 @@ def save_idempotency_record(key: str, draw_id: str, response_payload: dict | Any
     payload_str = json.dumps(response_payload) if not isinstance(response_payload, str) else response_payload
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
     with SessionLocal() as session:
-        rec = IdempotencyRecord(
-            key=key,
-            draw_id=draw_id,
-            response_payload=payload_str,
-            created_at=ts,
-        )
-        session.merge(rec)
-        session.commit()
+        try:
+            rec = IdempotencyRecord(
+                key=key,
+                draw_id=draw_id,
+                response_payload=payload_str,
+                created_at=ts,
+            )
+            session.merge(rec)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
 
 
 def log_api_request(api_key: str, endpoint: str) -> None:
