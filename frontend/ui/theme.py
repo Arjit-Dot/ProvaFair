@@ -130,6 +130,18 @@ pre.pf-circ{ font-family:'IBM Plex Mono',monospace; font-size:.8rem; color:#bcd3
 .pf-banner.bad{ background:var(--alarm-dim); border:1px solid rgba(255,77,109,.5); color:#ffc2cc; }
 .pf-banner.ok{ background:var(--photon-dim); border:1px solid rgba(124,240,255,.4); color:var(--photon); }
 
+
+.pf-badge{ display:inline-block; padding:.22rem .8rem; border-radius:999px; font-size:.8rem; font-weight:700; letter-spacing:.08em; border:1px solid; }
+.pf-badge.hardware{ background:rgba(60,220,140,.16); color:#3cdc8c; border-color:rgba(60,220,140,.6); }
+.pf-badge.sim{ background:var(--amber-dim); color:var(--amber); border-color:rgba(255,193,94,.55); }
+.pf-badge.classical{ background:var(--alarm-dim); color:var(--alarm); border-color:rgba(255,77,109,.6); }
+.pf-modebar{ display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; margin:.2rem 0 .8rem; }
+.pf-check{ display:flex; gap:.8rem; align-items:flex-start; padding:.6rem .85rem; margin-bottom:.45rem; border-radius:12px; border:1px solid var(--edge); background:rgba(255,255,255,.03); }
+.pf-check.ok{ border-color:rgba(60,220,140,.45); } .pf-check.bad{ border-color:rgba(255,77,109,.6); background:var(--alarm-dim); }
+.pf-check i{ font-style:normal; font-weight:800; font-size:1.2rem; width:1.4rem; } .pf-check.ok i{ color:#3cdc8c; } .pf-check.bad i{ color:var(--alarm); }
+.pf-check .nm{ font-weight:500; } .pf-check .dt{ color:var(--muted); font-size:.8rem; }
+.pf-demo{ margin:.6rem 0; padding:.6rem .8rem; border-radius:10px; background:var(--amber-dim); border:1px solid rgba(255,193,94,.5); color:var(--amber); font-size:.88rem; }
+
 .play .fx{ opacity:0; animation:rise .55s cubic-bezier(.2,.8,.2,1) forwards; animation-delay:calc(var(--i) * 90ms); }
 .play .pf-chip.fx{ animation-name:pop; }
 .play .bar.fx{ transform-box:fill-box; transform-origin:bottom; animation-name:grow; animation-duration:.7s; }

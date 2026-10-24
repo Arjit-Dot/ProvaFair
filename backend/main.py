@@ -1,11 +1,9 @@
 from fastapi import FastAPI, HTTPException, Security, Depends, Header, Request, BackgroundTasks, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from typing import Any, Dict
 import os
-import secrets
 import sys
 from pathlib import Path
 import uuid
@@ -18,8 +16,6 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 # Import our custom engines and database
-from quantum.chsh_engine import run_chsh_test, extract_quantum_random_numbers
-from quantum.rigged_engine import run_rigged_test, generate_rigged_numbers
 from ledger.audit_db import (
     init_db,
     record_draw,
@@ -32,8 +28,11 @@ from ledger.audit_db import (
     get_ledger_draw_count,
     calculate_merkle_root,
 )
-from quantum_engine.batcher import calculate_batches
 import api_v2
+import config  # noqa: F401  (loads .env before anything reads API_KEY)
+from core import pipeline
+from security import PROVA_API_KEY, verify_api_key  # noqa: F401  (PROVA_API_KEY re-exported)
+from services import router as services_router
 
 app = FastAPI(title="ProvaFair API", description="Quantum-secured lottery backend")
 
@@ -46,47 +45,9 @@ app.add_middleware(
 )
 
 app.include_router(api_v2.router)
+app.include_router(services_router.router)
 
-# --- API Key Security Configuration ---
-API_KEY_NAME = "X-API-Key"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-PROVA_API_KEY = os.getenv("PROVA_API_KEY", "PROVA-HACK-2026")
-
-
-_rate_limit_lock = threading.Lock()
-
-
-def verify_api_key(
-    request: Request,
-    api_key: str = Security(api_key_header),
-) -> str:
-    """
-    Validates API key using constant-time string comparison to prevent timing attacks.
-    Checks rate limit (maximum 5 requests per 60 seconds).
-    Logs API request upon successful validation and rate limit check.
-    Raises 401 Unauthorized if missing or invalid.
-    Raises 429 Too Many Requests if rate limit is exceeded.
-    """
-    if not api_key or not secrets.compare_digest(api_key, PROVA_API_KEY):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or missing API Key"
-        )
-
-    # Rate limiting: max 5 requests per minute (60 seconds) synchronized under lock
-    with _rate_limit_lock:
-        recent_count = count_recent_requests(api_key, window_seconds=60)
-        if recent_count >= 5:
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded"
-            )
-
-        # Log usage
-        endpoint = request.url.path if request else "unknown"
-        log_api_request(api_key, endpoint)
-
-    return api_key
+# API key auth + rate limiting live in security.py (key comes from API_KEY in .env)
 
 
 @app.on_event("startup")
@@ -112,58 +73,79 @@ class MultiServiceResponse(BaseModel):
     ibm_job_id: str = "SIMULATED"
 
 
-def process_draw_background(
-    draw_id: str,
-    event_name: str,
-    service_type: str,
-    status: str,
-    chsh_score: float,
-    payload: Any,
-    webhook_url: str | None = None,
-    idempotency_key: str | None = None,
-    ibm_job_id: str = "SIMULATED",
-) -> MultiServiceResponse:
-    """
-    Worker function that executes the draw persistence in the ledger,
-    saves the idempotency record, and delivers results to webhook_url if configured.
-    """
-    receipt_hash = record_draw(
-        draw_id=draw_id,
-        event_name=event_name,
-        chsh_score=chsh_score,
-        status=status,
-        winners=payload,
-        service_type=service_type,
-        ibm_job_id=ibm_job_id,
-    )
+SERVICE_ALIASES = {"quantum_lottery": "lottery", "validator": "web3", "blockchain": "web3"}
 
-    saved_draw = get_draw(draw_id)
-    previous_hash = saved_draw["previous_hash"] if saved_draw else "GENESIS"
 
+def _legacy_params(service: str, params: dict) -> dict:
+    """The old API sent {"num_winners": n}. For the lottery that now means n winners among tickets."""
+    params = dict(params or {})
+    n = params.pop("num_winners", None)
+    if n is not None and service == "lottery" and "game" not in params:
+        n = int(n)
+        params.update(game="tickets", n_tickets=max(10_000, 2 * n), tiers=[{"name": "Prize", "winners": n}])
+    elif n is not None and service == "web3" and "seats" not in params:
+        params["seats"] = int(n)
+    return params
+
+
+def _to_response(out: dict) -> tuple[str, str, float, str, Any, str]:
+    rc = out["receipt"]
+    return rc["run_id"], rc["status"], rc["S"], rc["job_id"], out["result"], rc["service"]
+
+
+def _persist(out: dict, event_name: str, idempotency_key: str | None, webhook_url: str | None) -> MultiServiceResponse:
+    """Record the finished draw in the audit ledger, cache the idempotent response, deliver the webhook."""
+    run_id, status_str, s_score, job_id, result, service = _to_response(out)
+    receipt_hash = record_draw(draw_id=run_id, event_name=event_name, chsh_score=s_score, status=status_str,
+                               winners=result, service_type=service, ibm_job_id=job_id)
+    saved = get_draw(run_id)
     response = MultiServiceResponse(
-        draw_id=draw_id,
-        service_type=service_type,
-        status=status,
-        chsh_score=chsh_score,
-        payload=payload,
-        receipt_hash=receipt_hash,
-        previous_hash=previous_hash,
-        ibm_job_id=ibm_job_id,
-    )
-
+        draw_id=run_id, service_type=service, status=status_str, chsh_score=s_score, payload=result,
+        receipt_hash=receipt_hash, previous_hash=saved["previous_hash"] if saved else "GENESIS", ibm_job_id=job_id)
     if idempotency_key:
-        save_idempotency_record(idempotency_key, draw_id, response.model_dump())
-
+        save_idempotency_record(idempotency_key, run_id, response.model_dump())
     if webhook_url:
         try:
             requests.post(webhook_url, json=response.model_dump(), timeout=10)
         except Exception:
             pass
-
     return response
 
 
+def _background_draw(service, run_id, mode, event_name, idempotency_key, webhook_url):
+    out = pipeline.complete_draw(service, run_id, mode)
+    _persist(out, event_name, idempotency_key, webhook_url)
+
+
 _draw_lock = threading.Lock()
+
+
+def _run(request: MultiServiceRequest, background_tasks: BackgroundTasks, idempotency_key: str | None,
+         mode: str, event_name: str):
+    service = SERVICE_ALIASES.get(request.service_type, request.service_type)
+    if service not in pipeline.REGISTRY:
+        raise HTTPException(422, f"unknown service_type {request.service_type!r}; use one of {list(pipeline.REGISTRY)}")
+
+    def go():
+        try:
+            run_id = pipeline.start_draw(service, _legacy_params(service, request.service_params), mode)
+        except pipeline.PipelineError as e:
+            raise HTTPException(e.status, str(e))
+        if request.webhook_url:
+            background_tasks.add_task(_background_draw, service, run_id, mode, event_name, idempotency_key,
+                                      request.webhook_url)
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content={"draw_id": run_id, "status": "QUEUED"})
+        out = pipeline.complete_draw(service, run_id, mode)
+        resp = _persist(out, event_name, idempotency_key, None)
+        return resp
+
+    if idempotency_key:
+        with _draw_lock:                       # check-then-run must be atomic so duplicates run only once
+            cached = get_idempotency_record(idempotency_key)
+            if cached:
+                return MultiServiceResponse(**cached)
+            return go()
+    return go()
 
 
 @app.post("/draw/quantum", response_model=MultiServiceResponse, dependencies=[Depends(verify_api_key)])
@@ -172,100 +154,10 @@ def api_run_quantum_draw(
     background_tasks: BackgroundTasks,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
-    """
-    Endpoint 1: Runs the true quantum draw. 
-    Verifies physics, draws numbers, and saves to the tamper-proof ledger.
-    Supports Idempotency-Key header to prevent duplicate processing.
-    Supports asynchronous webhook delivery via BackgroundTasks.
-    """
-    if idempotency_key:
-        with _draw_lock:
-            cached = get_idempotency_record(idempotency_key)
-            if cached:
-                return MultiServiceResponse(**cached)
-
-            draw_id = f"DRAW-Q-{uuid.uuid4().hex[:8].upper()}"
-
-            # Extract num_winners from service_params (defaulting to 1) and calculate batches
-            num_winners = int(request.service_params.get("num_winners", 1))
-            batches = calculate_batches(num_winners)
-            print(f"[Quantum Batcher] Slicing {num_winners} circuits into batches: {batches}")
-            
-            # Placeholder values while quantum engine multi-service integration is updated
-            chsh_score = 2.8284
-            status_str = "VERIFIED - TRUE QUANTUM"
-            payload = [1, 2, 3]
-            ibm_job_id = f"ibm-q-job-{uuid.uuid4().hex[:8]}"
-
-            if request.webhook_url:
-                background_tasks.add_task(
-                    process_draw_background,
-                    draw_id=draw_id,
-                    event_name="Quantum Secure Draw",
-                    service_type=request.service_type,
-                    status=status_str,
-                    chsh_score=chsh_score,
-                    payload=payload,
-                    webhook_url=request.webhook_url,
-                    idempotency_key=idempotency_key,
-                    ibm_job_id=ibm_job_id,
-                )
-                return JSONResponse(
-                    status_code=status.HTTP_202_ACCEPTED,
-                    content={"draw_id": draw_id, "status": "QUEUED"},
-                )
-
-            return process_draw_background(
-                draw_id=draw_id,
-                event_name="Quantum Secure Draw",
-                service_type=request.service_type,
-                status=status_str,
-                chsh_score=chsh_score,
-                payload=payload,
-                webhook_url=None,
-                idempotency_key=idempotency_key,
-                ibm_job_id=ibm_job_id,
-            )
-
-    draw_id = f"DRAW-Q-{uuid.uuid4().hex[:8].upper()}"
-    num_winners = int(request.service_params.get("num_winners", 1))
-    batches = calculate_batches(num_winners)
-    print(f"[Quantum Batcher] Slicing {num_winners} circuits into batches: {batches}")
-    
-    chsh_score = 2.8284
-    status_str = "VERIFIED - TRUE QUANTUM"
-    payload = [1, 2, 3]
-    ibm_job_id = f"ibm-q-job-{uuid.uuid4().hex[:8]}"
-
-    if request.webhook_url:
-        background_tasks.add_task(
-            process_draw_background,
-            draw_id=draw_id,
-            event_name="Quantum Secure Draw",
-            service_type=request.service_type,
-            status=status_str,
-            chsh_score=chsh_score,
-            payload=payload,
-            webhook_url=request.webhook_url,
-            idempotency_key=None,
-            ibm_job_id=ibm_job_id,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={"draw_id": draw_id, "status": "QUEUED"},
-        )
-
-    return process_draw_background(
-        draw_id=draw_id,
-        event_name="Quantum Secure Draw",
-        service_type=request.service_type,
-        status=status_str,
-        chsh_score=chsh_score,
-        payload=payload,
-        webhook_url=None,
-        idempotency_key=None,
-        ibm_job_id=ibm_job_id,
-    )
+    """Runs the real pipeline in sim mode: Aer CHSH circuits, certification, then the requested service.
+    The response carries the real CHSH score and the real job id (SIM-... on the simulator).
+    Keys are never returned here (responses are cached); use POST /v3/keys/draw for demo keys."""
+    return _run(request, background_tasks, idempotency_key, "sim", "Quantum Secure Draw")
 
 
 @app.post("/draw/rigged", response_model=MultiServiceResponse, dependencies=[Depends(verify_api_key)])
@@ -274,89 +166,8 @@ def api_run_rigged_draw(
     background_tasks: BackgroundTasks,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
-    """
-    Endpoint 2: Simulates the "Fraud Machine".
-    Fails the physics test and outputs deterministic numbers.
-    Supports Idempotency-Key header to prevent duplicate processing.
-    Supports asynchronous webhook delivery via BackgroundTasks.
-    """
-    if idempotency_key:
-        with _draw_lock:
-            cached = get_idempotency_record(idempotency_key)
-            if cached:
-                return MultiServiceResponse(**cached)
-
-            draw_id = f"DRAW-R-{uuid.uuid4().hex[:8].upper()}"
-            chsh_score = 1.4142
-            status_str = "REJECTED - CLASSICAL DEVICE DETECTED"
-            payload = [1, 2, 3]
-            ibm_job_id = "SIMULATED"
-
-            if request.webhook_url:
-                background_tasks.add_task(
-                    process_draw_background,
-                    draw_id=draw_id,
-                    event_name="Rigged Demo Draw",
-                    service_type=request.service_type,
-                    status=status_str,
-                    chsh_score=chsh_score,
-                    payload=payload,
-                    webhook_url=request.webhook_url,
-                    idempotency_key=idempotency_key,
-                    ibm_job_id=ibm_job_id,
-                )
-                return JSONResponse(
-                    status_code=status.HTTP_202_ACCEPTED,
-                    content={"draw_id": draw_id, "status": "QUEUED"},
-                )
-
-            return process_draw_background(
-                draw_id=draw_id,
-                event_name="Rigged Demo Draw",
-                service_type=request.service_type,
-                status=status_str,
-                chsh_score=chsh_score,
-                payload=payload,
-                webhook_url=None,
-                idempotency_key=idempotency_key,
-                ibm_job_id=ibm_job_id,
-            )
-
-    draw_id = f"DRAW-R-{uuid.uuid4().hex[:8].upper()}"
-    chsh_score = 1.4142
-    status_str = "REJECTED - CLASSICAL DEVICE DETECTED"
-    payload = [1, 2, 3]
-    ibm_job_id = "SIMULATED"
-
-    if request.webhook_url:
-        background_tasks.add_task(
-            process_draw_background,
-            draw_id=draw_id,
-            event_name="Rigged Demo Draw",
-            service_type=request.service_type,
-            status=status_str,
-            chsh_score=chsh_score,
-            payload=payload,
-            webhook_url=request.webhook_url,
-            idempotency_key=None,
-            ibm_job_id=ibm_job_id,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={"draw_id": draw_id, "status": "QUEUED"},
-        )
-
-    return process_draw_background(
-        draw_id=draw_id,
-        event_name="Rigged Demo Draw",
-        service_type=request.service_type,
-        status=status_str,
-        chsh_score=chsh_score,
-        payload=payload,
-        webhook_url=None,
-        idempotency_key=None,
-        ibm_job_id=ibm_job_id,
-    )
+    """The fraud-machine demo: a classical device runs the same pipeline. It fails the CHSH rule and is BLOCKED."""
+    return _run(request, background_tasks, idempotency_key, "classical", "Rigged Demo Draw")
 
 
 @app.get("/verify/{draw_id}")

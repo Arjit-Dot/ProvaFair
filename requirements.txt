@@ -21,3 +21,8 @@ uvicorn>=0.28.0
 requests>=2.31.0
 sqlalchemy>=2.0.0
 httpx>=0.28.0
+
+# --- Hardware path (Phase 3) and tests ---
+qiskit-ibm-runtime>=0.40.0
+matplotlib>=3.7
+pytest>=8.0
