@@ -170,3 +170,87 @@ def link_card(ent, idx, status, i):
     return (f'<div class="pf-link {tone} fx" style="--i:{i}"><div class="top"><span><b>#{idx}</b> {e(ent["draw_id"])} '
             f'<span class="pf-note">{e(ent["status"])}, S = {ent["chsh_score"]}</span>{tam}</span>{pill}</div>'
             f'<div class="h"><em>hash </em>{e(short(ent["hash"], 24))}<br><em>prev </em>{e(short(ent["prev_hash"], 24))}</div></div>')
+
+
+# ----------------------------------------------------------------- service console
+MODE_PREVIEW = {
+    "sim": {"text": "SIMULATOR", "tone": "sim"},
+    "control": {"text": "SIMULATOR (control, no entanglement)", "tone": "sim"},
+    "classical": {"text": "CLASSICAL", "tone": "classical"},
+    "replay": {"text": "REPLAY of a recorded run", "tone": "sim"},
+}
+
+
+def mode_badge(b, note=""):
+    """Always visible on service pages. A replay is never labelled live."""
+    bits = [x for x in (b.get("backend"), b.get("date"), f"job {b['job_id']}" if b.get("job_id") else None) if x]
+    if b.get("replayed") and b.get("replay_of"):
+        bits.append(f"replay of {b['replay_of']}")
+    meta = " | ".join(bits) or note
+    return (f'<div class="pf-modebar"><span class="pf-badge {e(b["tone"])}">{e(b["text"])}</span>'
+            f'<span class="pf-note">{e(meta)}</span></div>')
+
+
+def checks_html(v, start=0):
+    rows = ""
+    for i, c in enumerate(v["checks"]):
+        rows += (f'<div class="pf-check {"ok" if c["ok"] else "bad"} fx" style="--i:{start + i}"><i>{"&#10003;" if c["ok"] else "&#10005;"}</i>'
+                 f'<div><div class="nm">{c["id"]}. {e(c["name"])}</div><div class="dt">{e(c["detail"])}</div></div></div>')
+    tone = "ok" if v["all_ok"] else "bad"
+    head = (f'<div class="pf-rule {tone} fx" style="--i:{start}">'
+            f'{"All 5 checks passed: every value was recomputed from the saved files." if v["all_ok"] else "At least one check failed. This record cannot be trusted."}</div>')
+    return head + rows
+
+
+def _chips_more(items, n=40, bad=False):
+    items = list(items)
+    extra = f'<div class="pf-note">... and {len(items) - n} more (full list in the saved result)</div>' if len(items) > n else ""
+    return chips(items[:n], bad=bad) + extra
+
+
+def result_inner(service, r, ver=None):
+    """HTML for a finished run: verdict gauge, service output, receipt."""
+    rc, ct, res = r["receipt"], r["certificate"], r["result"]
+    chsh = {"S": ct["S"], "margin": ct["sigma"] * ct["sigma_k"], "lower_bound": ct["lower_bound"],
+            "certified": ct["certified"], "rule": ct["rule"]}
+    body = mode_badge(rc["badge"]) + verdict_block(chsh, ct["certified"])
+    if not ct["certified"]:
+        body += ('<div class="pf-lock"><b>No output released</b>The physics check failed, so no seed was derived and the '
+                 "service produced nothing. This is the fail-closed rule.</div>")
+    elif service == "ipo":
+        body += (f'<div class="pf-keyrow"><div>Lots available<b>{res["lots_available"]}</b></div>'
+                 f'<div>Applicants<b>{res["applicants"]}</b></div>'
+                 f'<div>Oversubscription<b>{res["oversubscription_ratio"]}x</b></div>'
+                 f'<div>Allotted<b>{len(res["allottees"])}</b></div></div>'
+                 f'<div class="pf-title">Allottees</div>{_chips_more(res["allottees"])}'
+                 f'<div class="pf-title">Waiting list order</div>{_chips_more(res["waiting_list"], bad=True) if res["waiting_list"] else "<div class=pf-note>Undersubscribed: everyone was allotted.</div>"}')
+    elif service == "web3":
+        body += (f'<div class="pf-title">Committee for epoch {res["epoch_id"]} (selection order)</div>'
+                 f'{chips([v["id"] + " (" + str(v["stake"]) + ")" for v in res["committee"]])}'
+                 f'<div class="pf-title">Randomness beacon (32 bytes)</div><div class="pf-hash">{e(res["beacon"])}</div>')
+    elif service == "lottery":
+        if res["game"] == "numbers":
+            body += f'<div class="pf-title">Winning numbers</div>{chips(res["numbers"])}'
+            if res["bonus"] is not None:
+                body += f'<div class="pf-title">Bonus ball</div>{chips([res["bonus"]])}'
+        else:
+            for t in res["prizes"]:
+                body += f'<div class="pf-title">{e(t["tier"])}</div>{_chips_more(t["tickets"], 30)}'
+    elif service == "keys":
+        body += ('<div class="pf-demo">DEMO KEYS, NOT FOR REAL USE. Shown once and never stored. Each key is '
+                 "HKDF(quantum seed + local OS randomness), because the cloud provider sees the raw hardware bits.</div>")
+        for i, k in enumerate(r.get("demo_keys") or []):
+            body += f'<div class="pf-kv">key {i}</div><div class="pf-hash">{e(k)}</div>'
+        if not r.get("demo_keys"):
+            body += '<div class="pf-note">Keys are not kept. Only fingerprints are in the receipt.</div>'
+        body += (f'<div class="pf-title">Fingerprints (SHA-256 of each key)</div>'
+                 + "".join(f'<div class="pf-hash">{e(f)}</div>' for f in res["fingerprints"][:8]))
+    body += (f'<div class="pf-title" style="margin-top:.8rem">Receipt</div>'
+             f'<div class="pf-kv">Run <b>{e(rc["run_id"])}</b> | scenario <b>{e(rc["scenario"])}</b></div>'
+             f'<div class="pf-kv">Parameters hash (committed before the draw)</div><div class="pf-hash">{e(rc["params_hash"])}</div>'
+             f'<div class="pf-kv">Seed hash</div><div class="pf-hash">{e(rc["seed_hash"] or "none (blocked)")}</div>'
+             f'<div class="pf-kv">Ledger hash</div><div class="pf-hash">{e(rc["ledger_hash"])}</div>'
+             f'<div class="pf-note">{e(rc["limits"])}</div>')
+    if ver:
+        body += '<div class="pf-title" style="margin-top:.8rem">Verification</div>' + checks_html(ver)
+    return body

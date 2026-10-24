@@ -362,7 +362,7 @@ async def run_stress_test():
             await asyncio.sleep(0.1)
 
         p3_status_ok = (p3_immediate_status == 202 and p3_immediate_body.get("status") == "QUEUED")
-        has_ibm_job_id = bool(delivered_payload.get("ibm_job_id") and delivered_payload["ibm_job_id"].startswith("ibm-q-job-"))
+        has_ibm_job_id = bool(delivered_payload.get("ibm_job_id") and not delivered_payload["ibm_job_id"].startswith("ibm-q-job-"))   # real pipeline job id (SIM-... on the simulator), not the old fake id
         draw_id_matches = (delivered_payload.get("draw_id") == p3_draw_id)
         p3_passed = p3_status_ok and webhook_delivered and has_ibm_job_id and draw_id_matches
 

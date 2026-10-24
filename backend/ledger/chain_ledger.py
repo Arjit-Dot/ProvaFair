@@ -1,11 +1,12 @@
 """Tamper-evident hash chain. Each entry hashes its own fields plus the previous hash."""
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
 
-DB = "chain_ledger.db"
+DB = os.getenv("PROVAFAIR_LEDGER_DB", "chain_ledger.db")
 GENESIS = "0" * 64
 _lock = threading.Lock()
 FIELDS = ["draw_id", "mode", "event_name", "timestamp", "chsh_score", "sigma",
