@@ -98,6 +98,14 @@ class UiTests(unittest.TestCase):
         self.assertIn("SIMULATOR (live, fake backend)", text)
         self.assertIn("DRAW CERTIFIED", text)
 
+    def test_retrieve_option_is_offered_with_explanation(self):
+        at = self.page("ipo.py")
+        self.assertIn("Retrieve from IBM (pre-submitted job)", at.radio(key="ipo_mode").options)
+        at.radio(key="ipo_mode").set_value("retrieve")  # option value is the key, label shown in the UI
+        at.run()
+        self.assertIn("Fetches the finished hardware job from IBM", md(at))
+        self.assertIn("Nothing is submitted", md(at))
+
     def test_classical_and_control_show_blocked_and_no_output(self):
         for mode, badge in (("classical", "CLASSICAL"), ("control", "control, no entanglement")):
             at = self.run_draw("lottery.py", "lottery", mode)

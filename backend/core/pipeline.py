@@ -10,7 +10,7 @@ from core.seed import canonical, derive_seed, params_hash, sha256_hex
 from ledger import chain_ledger as ledger
 from services import REGISTRY
 
-MODES = ("sim", "control", "classical", "replay", "live")
+MODES = ("sim", "control", "classical", "replay", "live", "retrieve")
 
 # live mode: try real hardware, fall back to a saved hardware run (never silently, never labelled live)
 _live_lock = threading.Lock()
@@ -54,6 +54,12 @@ def badge(meta: dict) -> dict:
     else:
         text = "SIMULATOR (replayed)" if replay else "SIMULATOR"
     note = None
+    ra = meta.get("retrieve_attempt") or {}
+    if ra.get("outcome") == "ibm":
+        text = "HARDWARE (recorded, retrieved from IBM)" if src == "hardware" else text
+        note = None
+    elif ra.get("outcome") == "local":
+        note = f"Could not retrieve from IBM: {ra.get('reason')}. Using the saved local copy of the same job."
     if la.get("outcome") == "live":
         text = "HARDWARE (live)" if src == "hardware" else "SIMULATOR (live, fake backend)"
     elif la.get("outcome") == "fallback":
@@ -111,6 +117,43 @@ def _replay_into(service: str, d, src_id: str) -> dict:
     return meta
 
 
+def _retrieve_into(service: str, d, source_run: str | None) -> dict:
+    """Submit-ahead / retrieve-at-demo: fetch a finished hardware job's bits from IBM by its saved job ID,
+    cross-check them against the local copy, then run the rest of the pipeline on them.
+
+    If IBM cannot be reached we use the local copy of the same job and say so. If IBM and the local copy
+    disagree we refuse: one of them has been altered."""
+    src_id = source_run or _latest_source(service, hardware_only=True)
+    try:
+        sd = store.run_dir(service, src_id)
+        meta = store.read_json(sd, "job_meta.json")
+        cert = store.read_json(sd, "certificate.json")
+    except (FileNotFoundError, ValueError):
+        raise PipelineError(f"source run {src_id!r} not found", 404)
+    if meta.get("source") != "hardware" or meta.get("local"):
+        raise PipelineError("retrieve works only for runs recorded from real IBM hardware", 400)
+    if not cert["certified"]:
+        raise PipelineError("cannot reuse a blocked run", 400)
+    local = store.read_json(sd, "bitstrings.json") if store.exists(sd, "bitstrings.json") else None
+    got = hardware.fetch_job_bits_safe(meta["job_id"], meta.get("circuits"), live_config()["probe_timeout"] * 2)
+    if got["ok"]:
+        if local is not None and got["bits"] != local:
+            raise PipelineError(f"bits retrieved from IBM for job {meta['job_id']} do not match the saved copy "
+                                f"in {src_id}: one of them has been altered. Refusing to use either.", 409)
+        bits = got["bits"]
+        att = {"outcome": "ibm", "reason": None, "fetched_at": _now(), "matches_local": None if local is None else True}
+    elif local is not None:
+        bits = local
+        att = {"outcome": "local", "reason": got["error"], "fetched_at": None, "matches_local": None}
+    else:
+        raise PipelineError(f"cannot retrieve job {meta['job_id']} from IBM ({got['error']}) and there is no local copy", 503)
+    out = {**meta, "replay_of": meta.get("replay_of") or src_id, "retrieve_attempt": att}
+    out.pop("live_attempt", None)
+    store.write_json(d, "job_meta.json", out)
+    store.write_json(d, "bitstrings.json", bits)
+    return out
+
+
 def _try_live(service: str, d, shots: int) -> tuple[dict | None, dict]:
     """Attempt a live run. Returns (meta, attempt). meta is None when we must fall back, with attempt['reason']."""
     global _live_used
@@ -154,6 +197,8 @@ def acquire_bits(service: str, run_id: str, mode: str, shots: int, source_run: s
     d = store.run_dir(service, run_id)
     if mode == "replay":
         return _replay_into(service, d, source_run or _latest_source(service))
+    if mode == "retrieve":
+        return _retrieve_into(service, d, source_run)
     if mode == "live":
         meta, att = _try_live(service, d, shots)
         if meta is not None:
@@ -212,7 +257,7 @@ def finalize_run(service: str, run_id: str) -> tuple[dict, object]:
                         [ph, seed_hash, result_hash])
     receipt = {"run_id": run_id, "service": service, "scenario": label, "status": stored["status"],
                "certified": cert["certified"], "source": meta["source"], "backend": meta.get("backend"),
-               "job_id": meta.get("job_id"), "replay_of": meta.get("replay_of"), "live_attempt": meta.get("live_attempt"), "params_hash": ph,
+               "job_id": meta.get("job_id"), "replay_of": meta.get("replay_of"), "live_attempt": meta.get("live_attempt"), "retrieve_attempt": meta.get("retrieve_attempt"), "params_hash": ph,
                "S": cert["S"], "sigma": cert["sigma"], "lower_bound": cert["lower_bound"], "seed_hash": seed_hash,
                "result_hash": result_hash, "ledger_hash": rec["hash"], "ledger_prev_hash": rec["prev_hash"],
                "finalized": _now(), "badge": badge(meta), "limits": svc.LIMITS}
@@ -226,7 +271,7 @@ def start_draw(service: str, params: dict, mode: str = "sim", scenario: str = "d
         raise PipelineError(f"mode must be one of {MODES}", 422)
     if not 64 <= shots <= 8192:
         raise PipelineError("shots per setting must be between 64 and 8192", 422)
-    return commit_run(service, params, scenario, source={"control": "control-sim", "live": "hardware"}.get(mode, mode))[0]
+    return commit_run(service, params, scenario, source={"control": "control-sim", "live": "hardware", "retrieve": "hardware"}.get(mode, mode))[0]
 
 
 def complete_draw(service: str, run_id: str, mode: str = "sim", shots: int = 1024,

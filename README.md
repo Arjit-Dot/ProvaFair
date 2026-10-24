@@ -120,10 +120,11 @@ frontend/
 
 ## Live hardware with a replay fallback
 
-The four services (IPO, Web3, Lottery, Keys) can take their randomness from five sources, chosen on each page:
+The four services (IPO, Web3, Lottery, Keys) can take their randomness from six sources, chosen on each page:
 
 | Mode | What happens | Badge |
 |---|---|---|
+| **Retrieve** | Submit-ahead flow: jobs are submitted to IBM the night before. At the demo, the finished job's bits are fetched from IBM by its saved job ID, cross-checked against the local copy (a mismatch is refused), and the whole service runs live on them. Nothing is submitted. If IBM is unreachable it uses the local copy and says so. | `HARDWARE (recorded, retrieved from IBM)` |
 | **Live** | If IBM is reachable and no jobs are queued, the CHSH circuits run on real hardware. Otherwise the draw uses the saved hardware run, and says why. | `HARDWARE (live)`, or `HARDWARE (recorded)` plus the reason |
 | Replay | Re-runs the service on a saved run's bits (instant, works offline) | `HARDWARE (recorded)` / `SIMULATOR (replayed)` |
 | Simulator | Fresh Aer run | `SIMULATOR` |
@@ -136,7 +137,7 @@ Settings (environment variables, or `.env`): `PROVAFAIR_MODE=live` to make Live 
 
 Credentials: your IBM key lives in `.env` as `API_KEY` and is saved once with `QiskitRuntimeService.save_account(..., name="open")`. ProvaFair's own login key is `PROVAFAIR_API_KEY`.
 
-Before the event, run `python backend/scripts/live_check.py` (read-only, no QPU time). It reports whether live is usable right now and whether every service has a saved hardware run to fall back to. Record runs with `scripts/submit.py --backend open` then `scripts/collect.py`.
+Before the event, run `python backend/scripts/live_check.py` (read-only, no QPU time). It reports whether live is usable right now and whether every service has a saved hardware run to fall back to. It also checks that each saved job can be fetched from IBM and matches the local copy. Record runs with `scripts/submit.py --backend open` then `scripts/collect.py`.
 
 ## How the physics works
 
