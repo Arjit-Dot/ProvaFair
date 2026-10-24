@@ -29,7 +29,7 @@ class ApiTests(helpers.Isolated, unittest.TestCase):
     def test_mode_and_services_endpoints(self):
         m = self.c.get("/v3/mode").json()
         self.assertEqual(m["default"], "sim")
-        self.assertEqual(set(m["modes"]), {"sim", "control", "classical", "replay", "live"})
+        self.assertEqual(set(m["modes"]), {"sim", "control", "classical", "replay", "live", "retrieve"})
         s = self.c.get("/v3/services").json()
         self.assertEqual(set(s), set(SERVICES))
         self.assertTrue(all(v["limits"] and v["defaults"] for v in s.values()))

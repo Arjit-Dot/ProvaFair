@@ -227,3 +227,27 @@ def wait_for_job(run_dir, queue_timeout: float, run_timeout: float = 120.0, poll
                 pass
             return "timeout"
         time.sleep(poll)
+
+
+def fetch_job_bits(job_id: str, circuits: list[str] | None = None, account: str = "open") -> dict:
+    """Read-only: download a finished job's per-shot bitstrings from IBM by job ID (no QPU time, nothing submitted)."""
+    job = get_service(account).job(job_id)
+    st = str(getattr(job.status(), "name", job.status())).upper()
+    if st != "DONE":
+        raise RuntimeError(f"job {job_id} is {st}, not DONE")
+    names = circuits or SETTING_NAMES
+    return {n: pub.data.c.get_bitstrings() for n, pub in zip(names, job.result())}
+
+
+def fetch_job_bits_safe(job_id: str, circuits: list[str] | None = None, timeout: float = 30.0,
+                        account: str = "open") -> dict:
+    """fetch_job_bits that never raises or hangs: {"ok": True, "bits": ...} or {"ok": False, "error": ...}."""
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        return {"ok": True, "bits": ex.submit(fetch_job_bits, job_id, circuits, account).result(timeout=timeout)}
+    except FutureTimeout:
+        return {"ok": False, "error": f"no answer from IBM within {timeout:g}s"}
+    except Exception as e:
+        return {"ok": False, "error": _scrub(f"{type(e).__name__}: {e}")}
+    finally:
+        ex.shutdown(wait=False)

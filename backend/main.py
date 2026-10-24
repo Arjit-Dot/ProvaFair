@@ -53,7 +53,7 @@ app.include_router(services_router.router)
 @app.on_event("startup")
 def startup_event():
     init_db()
-    if os.getenv("PROVAFAIR_MODE") == "live" and os.getenv("PROVAFAIR_LIVE_BACKEND", "open") == "open":
+    if os.getenv("PROVAFAIR_MODE") in ("live", "retrieve") and os.getenv("PROVAFAIR_LIVE_BACKEND", "open") == "open":
         # warm the IBM connection in the background so the first live draw is not slowed by the ~10 s cold start
         threading.Thread(target=lambda: __import__("core.hardware", fromlist=["x"]).live_probe_safe(60), daemon=True).start()
 

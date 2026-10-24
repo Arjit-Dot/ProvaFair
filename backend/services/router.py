@@ -22,7 +22,7 @@ DEFAULT_MODE = os.getenv("PROVAFAIR_MODE", "sim")
 
 class DrawBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
-    mode: Optional[Literal["sim", "control", "classical", "replay", "live"]] = None
+    mode: Optional[Literal["sim", "control", "classical", "replay", "live", "retrieve"]] = None
     scenario: str = "default"
     shots: int = Field(1024, ge=64, le=8192)
     source_run: Optional[str] = None
@@ -46,6 +46,8 @@ def mode():
                 "control": "Simulator with no entanglement: the rigged-device control, must be blocked",
                 "classical": "Seeded classical generator (labelled CLASSICAL), must be blocked",
                 "replay": "Re-run the service on a recorded run's bits (labelled as recorded/replayed, never live)",
+                "retrieve": "Fetch a finished hardware job from IBM by its saved job ID (submitted ahead of time), "
+                            "cross-check it with the saved copy, then run the service live on those bits",
                 "live": "Run on real hardware if there is no queue, otherwise fall back to the saved hardware run "
                         "(labelled HARDWARE (live) or HARDWARE (recorded) with the reason)"}}
 

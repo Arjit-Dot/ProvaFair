@@ -178,6 +178,7 @@ MODE_PREVIEW = {
     "control": {"text": "SIMULATOR (control, no entanglement)", "tone": "sim"},
     "classical": {"text": "CLASSICAL", "tone": "classical"},
     "replay": {"text": "REPLAY of a recorded run", "tone": "sim"},
+    "retrieve": {"text": "HARDWARE (recorded, retrieved from IBM)", "tone": "hardware"},
     "live": {"text": "LIVE hardware if no queue, else RECORDED run", "tone": "hardware"},
 }
 

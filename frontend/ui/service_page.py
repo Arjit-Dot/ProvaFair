@@ -4,7 +4,7 @@ from ui import api
 from ui.components import MODE_PREVIEW, empty_panel, error_panel, live_status_html, mode_badge, panel, result_inner
 
 H = 760
-MODES = {"live": "Live (falls back to recorded)", "replay": "Replay recorded run", "sim": "Simulator",
+MODES = {"retrieve": "Retrieve from IBM (pre-submitted job)", "live": "Live (falls back to recorded)", "replay": "Replay recorded run", "sim": "Simulator",
          "control": "Control (no entanglement)", "classical": "Classical (rigged)"}
 
 
@@ -36,6 +36,11 @@ def render(service: str, intro: str, form):
     prev = MODE_PREVIEW[mode]
     st.markdown(mode_badge({"text": prev["text"], "tone": prev["tone"]},
                            "selected source (the result shows the verified badge)"), unsafe_allow_html=True)
+    if mode == "retrieve":
+        st.markdown('<div class="pf-banner ok" style="margin:.2rem 0 .6rem">Fetches the finished hardware job from IBM '
+                    "by its saved job ID, cross-checks it against the saved copy, then runs the whole service live on "
+                    "those bits. Nothing is submitted. If IBM is unreachable it uses the saved copy and says so.</div>",
+                    unsafe_allow_html=True)
     if mode == "live":
         live, _ = api.cached_get_short("/v3/live/status")
         st.markdown(live_status_html(live), unsafe_allow_html=True)
@@ -46,7 +51,7 @@ def render(service: str, intro: str, form):
                       unsafe_allow_html=True)
         data, err = api.call("POST", f"/v3/{service}/draw", json={
             "params": params, "mode": mode, "scenario": scenario or "default", "shots": int(shots)},
-            timeout=180 if mode == "live" else 90)
+            timeout=180 if mode in ("live", "retrieve") else 90)
         ss[k("res")], ss[k("err")], ss[k("ver")], ss[k("fresh")] = data, err, None, data is not None
 
     if ss[k("err")]:
