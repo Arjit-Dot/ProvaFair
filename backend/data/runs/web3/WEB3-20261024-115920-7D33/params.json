@@ -1,0 +1,9 @@
+{
+  "params": {
+    "epoch_id": 1,
+    "n_validators": 20,
+    "seats": 5
+  },
+  "scenario": "hardware-4096",
+  "service": "web3"
+}

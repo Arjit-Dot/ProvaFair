@@ -1,0 +1,29 @@
+{
+  "result": {
+    "beacon": "b30de4f6e74246b775b3fda0255fad566d9de3e41bfc762560a377f9f2ce1ff1",
+    "committee": [
+      {
+        "id": "validator-014",
+        "stake": 736
+      },
+      {
+        "id": "validator-007",
+        "stake": 640
+      },
+      {
+        "id": "validator-004",
+        "stake": 704
+      },
+      {
+        "id": "validator-013",
+        "stake": 512
+      },
+      {
+        "id": "validator-009",
+        "stake": 352
+      }
+    ],
+    "epoch_id": 1
+  },
+  "status": "CERTIFIED"
+}

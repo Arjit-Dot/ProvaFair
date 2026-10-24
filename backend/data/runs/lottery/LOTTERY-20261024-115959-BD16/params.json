@@ -1,0 +1,10 @@
+{
+  "params": {
+    "bonus": false,
+    "game": "numbers",
+    "picks": 6,
+    "pool": 49
+  },
+  "scenario": "hardware-4096",
+  "service": "lottery"
+}

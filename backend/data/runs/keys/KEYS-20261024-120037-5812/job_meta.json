@@ -1,0 +1,26 @@
+{
+  "job_id": "dbe9rs0m94ac738rf200",
+  "backend": "ibm_fez",
+  "pair": [
+    143,
+    144
+  ],
+  "shots": 4096,
+  "circuits": [
+    "A0B0",
+    "A0B1",
+    "A1B0",
+    "A1B1"
+  ],
+  "entangled": true,
+  "submitted": "2026-10-24T12:00:49+00:00",
+  "finished": "2026-10-24T12:01:26+00:00",
+  "transpiled_depth": [
+    12,
+    12,
+    12,
+    12
+  ],
+  "source": "hardware",
+  "local": false
+}

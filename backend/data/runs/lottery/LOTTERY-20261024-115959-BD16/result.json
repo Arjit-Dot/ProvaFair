@@ -1,0 +1,15 @@
+{
+  "result": {
+    "bonus": null,
+    "game": "numbers",
+    "numbers": [
+      23,
+      25,
+      26,
+      34,
+      39,
+      49
+    ]
+  },
+  "status": "CERTIFIED"
+}

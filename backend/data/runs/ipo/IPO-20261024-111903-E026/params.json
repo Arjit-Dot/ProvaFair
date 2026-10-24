@@ -1,0 +1,11 @@
+{
+  "params": {
+    "lot_size": 100,
+    "n_applicants": 5000,
+    "price": 100.0,
+    "retail_pct": 35.0,
+    "total_shares": 1000000
+  },
+  "scenario": "test-256",
+  "service": "ipo"
+}

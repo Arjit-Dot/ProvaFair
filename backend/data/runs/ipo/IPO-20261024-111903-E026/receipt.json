@@ -1,0 +1,30 @@
+{
+  "S": 2.71875,
+  "backend": "ibm_fez",
+  "badge": {
+    "backend": "ibm_fez",
+    "date": "2026-10-24",
+    "job_id": "dbe98d7gdj9s73fldaqg",
+    "replay_of": null,
+    "replayed": false,
+    "text": "HARDWARE (recorded)",
+    "tone": "hardware"
+  },
+  "certified": true,
+  "finalized": "2026-10-24T11:19:39+00:00",
+  "job_id": "dbe98d7gdj9s73fldaqg",
+  "ledger_hash": "b55d44f3017de28e9c429071379bd7639c3a5a1672d5197b1cc30e2d3d4070f1",
+  "ledger_prev_hash": "2816b99c1febcd8577cb95f741a9705d3f2df08864e4bf3ef84a62196603c894",
+  "limits": "Simplified model: every valid applicant is allotted one lot until lots run out. Rules differ by country and offer. It does not detect duplicate or fake applicants and does not decide eligibility.",
+  "lower_bound": 2.44439,
+  "params_hash": "b0432e0266fcc9d694a41f9d6e393355c14616ebeb0cd83a428cc06dfde4158d",
+  "replay_of": null,
+  "result_hash": "43f23fca87fbe39598cfc052bc74722eb6c2f5aaae2e51a2507327e9679fbe3e",
+  "run_id": "IPO-20261024-111903-E026",
+  "scenario": "test-256",
+  "seed_hash": "2d0667148b2ec2a0ce0900f534bccd76af86ff4b531f26141470f47eb4275272",
+  "service": "ipo",
+  "sigma": 0.091453,
+  "source": "hardware",
+  "status": "CERTIFIED"
+}
