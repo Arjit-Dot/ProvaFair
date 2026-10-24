@@ -225,7 +225,7 @@ def verify_run(service: str, run_id: str) -> dict:
     seed = None
     if re_cert and re_cert["certified"] and meta and ph:
         seed = derive_seed(bits, ph, meta["job_id"], f"provafair/{service}/{full['scenario']}")
-        ok3 = sha256_hex(seed) == receipt["seed_hash"] == (entry["winners"][1] if entry else None)
+        ok3 = sha256_hex(seed) == receipt["seed_hash"] == (entry["winners"][1] if entry and len(entry["winners"]) == 3 else None)
         add(3, "Seed recomputed from bits, job ID and parameters", ok3, "SHA3-256 over domain | params hash | job ID | bits")
     elif re_cert and not re_cert["certified"]:
         ok3 = receipt["seed_hash"] is None
@@ -247,13 +247,22 @@ def verify_run(service: str, run_id: str) -> dict:
         ok4, d4 = False, "inputs unavailable"
     add(4, "Service output recomputed from the seed", ok4, d4)
 
-    # 5. ledger entry and chain
+    # 5. ledger entries: this run's COMMIT..result segment of the hash chain must be intact.
+    #    An unrelated break elsewhere in a shared ledger is reported but does not invalidate this run.
     chain = ledger.verify_chain()
-    ok5 = bool(entry and stored and chain["intact"] and entry["winners"][2] == sha256_hex(stored)
-               == receipt["result_hash"] and entry["hash"] == receipt["ledger_hash"])
-    d5 = ("ledger entry matches the receipt and the whole chain is intact" if ok5 else
-          "no ledger entry" if not entry else
-          f"chain broken at {chain['first_break_draw_id']}" if not chain["intact"] else "ledger entry does not match the files")
+    order = [e["draw_id"] for e in chain["entries"]]
+    seg_ok, seg_detail = False, "no ledger entry"
+    if entry and commit and commit["draw_id"] in order and run_id in order:
+        i, j = order.index(commit["draw_id"]), order.index(run_id)
+        seg = chain["entries"][i:j + 1]
+        seg_ok = i < j and all(e["hash_ok"] and e["link_ok"] for e in seg)
+        seg_detail = (f"{len(seg)} chained entries from the commitment to the result are intact" if seg_ok
+                      else "an entry between the commitment and the result is altered or out of order")
+    ok5 = bool(seg_ok and stored and len(entry["winners"]) == 3 and entry["winners"][2] == sha256_hex(stored) == receipt["result_hash"]
+               and entry["hash"] == receipt["ledger_hash"])
+    d5 = seg_detail if (seg_ok and ok5) else (seg_detail if not seg_ok else "ledger entry does not match the files")
+    if not chain["intact"] and ok5:
+        d5 += f" (note: the shared ledger has an unrelated break at {chain['first_break_draw_id']})"
     add(5, "Ledger entry and hash chain", ok5, d5)
     return {"run_id": run_id, "service": service, "all_ok": all(c["ok"] for c in checks), "checks": checks,
             "badge": receipt["badge"] if receipt else None}

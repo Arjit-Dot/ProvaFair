@@ -245,3 +245,20 @@ class ScriptTests(helpers.Isolated, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnrelatedLedgerBreakTests(helpers.Isolated, unittest.TestCase):
+    def test_unrelated_tampered_entry_does_not_invalidate_a_run_but_is_reported(self):
+        # an old, unrelated entry is forged BEFORE this run exists (like the demo 'tamper' button)
+        self.ledger.append("OLD-1", "sim", "demo", 2.8, 0.05, 100, "CERTIFIED", ["a"])
+        self.ledger.tamper("OLD-1")
+        out = pipeline.draw("lottery", {}, "sim", shots=256)
+        v = pipeline.verify_run("lottery", out["receipt"]["run_id"])
+        self.assertTrue(v["all_ok"], v)
+        self.assertIn("unrelated break at OLD-1", v["checks"][4]["detail"])
+
+    def test_entry_between_commit_and_result_tampered_fails(self):
+        out = pipeline.draw("lottery", {}, "sim", shots=256)
+        rid = out["receipt"]["run_id"]
+        self.ledger.tamper(rid)                      # alters the run's own entry
+        self.assertIn(5, failed(pipeline.verify_run("lottery", rid)))
