@@ -29,7 +29,7 @@ from ledger.audit_db import (
     calculate_merkle_root,
 )
 import api_v2
-import config  # noqa: F401  (loads .env before anything reads API_KEY)
+import config  # noqa: F401  (loads .env before anything reads PROVAFAIR_API_KEY)
 from core import pipeline
 from security import PROVA_API_KEY, verify_api_key  # noqa: F401  (PROVA_API_KEY re-exported)
 from services import router as services_router
@@ -47,7 +47,7 @@ app.add_middleware(
 app.include_router(api_v2.router)
 app.include_router(services_router.router)
 
-# API key auth + rate limiting live in security.py (key comes from API_KEY in .env)
+# API key auth + rate limiting live in security.py (key comes from PROVAFAIR_API_KEY in .env)
 
 
 @app.on_event("startup")
