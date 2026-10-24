@@ -1,0 +1,22 @@
+{
+  "result": {
+    "count": 4,
+    "fingerprints": [
+      "f2c275baf57f07764cf53095acca037c67a2d7a27230ed471e1abdc25400fca6",
+      "567a834b95d532e294ac7ef5dcf7b6110c685574d16d0a604749ccd5b8612cf3",
+      "0e06e1f818551ce69f952a5654940ec5c9b7261e53a4e5acdbeea5e4d6bbfecc",
+      "0e3ee541fe424f3189ce9ed754c194452352e263844c5d803e79ac03c1b97993"
+    ],
+    "format": "hex",
+    "length_bits": 256,
+    "purpose": "api-token",
+    "quantum_component_fingerprints": [
+      "1fedb6382ed271ef6e66dd3b1e795084ac3cdf75df7ec73a09cecfb3f73d35e1",
+      "6eac308e58cd170e039e395e3c64d80aa1c1f4ff23ff8b6387a6b941fe60069b",
+      "f9f2b5fdef2f7fb893864870505dc6d2edf725238702b8331daa997ed58df944",
+      "9ff7bb3112bd059e9ac8ca741804d26b519391f85bda67c105427de37aabc44a"
+    ],
+    "warning": "demo keys, not for real use"
+  },
+  "status": "CERTIFIED"
+}

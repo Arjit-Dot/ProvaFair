@@ -1,0 +1,10 @@
+{
+  "params": {
+    "count": 4,
+    "format": "hex",
+    "length_bits": 256,
+    "purpose": "api-token"
+  },
+  "scenario": "hardware-4096",
+  "service": "keys"
+}
