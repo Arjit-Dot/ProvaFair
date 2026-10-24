@@ -1,6 +1,8 @@
 """The shared pipeline every service uses: commit -> run/submit -> certify -> seed -> service -> receipt -> verify."""
+import os
 import secrets
 import shutil
+import threading
 from datetime import datetime, timezone
 
 from core import chsh, hardware, store
@@ -8,7 +10,18 @@ from core.seed import canonical, derive_seed, params_hash, sha256_hex
 from ledger import chain_ledger as ledger
 from services import REGISTRY
 
-MODES = ("sim", "control", "classical", "replay")
+MODES = ("sim", "control", "classical", "replay", "live")
+
+# live mode: try real hardware, fall back to a saved hardware run (never silently, never labelled live)
+_live_lock = threading.Lock()
+_live_used = 0
+
+
+def live_config() -> dict:
+    return {"max_pending": int(os.getenv("LIVE_MAX_PENDING", "0")),
+            "queue_timeout": float(os.getenv("LIVE_QUEUE_TIMEOUT", "30")),
+            "probe_timeout": float(os.getenv("LIVE_PROBE_TIMEOUT", "15")),
+            "max_jobs": int(os.getenv("LIVE_MAX_JOBS", "25")), "used": _live_used}
 
 
 class PipelineError(Exception):
@@ -30,6 +43,7 @@ def _now() -> str:
 def badge(meta: dict) -> dict:
     """What the UI must show. A replay is never labelled live."""
     src, replay = meta.get("source"), bool(meta.get("replay_of"))
+    la = meta.get("live_attempt") or {}
     when = (meta.get("finished") or meta.get("submitted") or "")[:10]
     if src == "hardware":
         text = "HARDWARE (recorded)" if meta.get("entangled", True) else "HARDWARE (recorded, control: no entanglement)"
@@ -39,7 +53,12 @@ def badge(meta: dict) -> dict:
         text = "SIMULATOR (control, no entanglement)"
     else:
         text = "SIMULATOR (replayed)" if replay else "SIMULATOR"
-    return {"text": text, "tone": "hardware" if src == "hardware" else "classical" if src == "classical" else "sim",
+    note = None
+    if la.get("outcome") == "live":
+        text = "HARDWARE (live)" if src == "hardware" else "SIMULATOR (live, fake backend)"
+    elif la.get("outcome") == "fallback":
+        note = f"Live hardware unavailable: {la.get('reason')}. Showing saved run {meta.get('replay_of')}."
+    return {"live": la.get("outcome"), "note": note, "text": text, "tone": "hardware" if src == "hardware" else "classical" if src == "classical" else "sim",
             "backend": meta.get("backend"), "date": when, "job_id": meta.get("job_id"),
             "replayed": replay, "replay_of": meta.get("replay_of")}
 
@@ -63,42 +82,106 @@ def commit_run(service: str, params: dict, scenario: str = "default", source: st
     return run_id, full, {"params_hash": ph, "dir": str(d)}
 
 
-def _latest_source(service: str) -> str:
+def _latest_source(service: str, hardware_only: bool = False) -> str:
+    kinds = ("hardware",) if hardware_only else ("hardware", "sim")
     for r in store.list_runs(service):
-        if r["certified"] and r["source"] in ("hardware", "sim") and not r["replay_of"]:
+        if r["certified"] and r["source"] in kinds and not r["replay_of"]:
             return r["run_id"]
-    raise PipelineError(f"no recorded certified {service} run to replay. Run in sim mode (or record hardware) first.", 404)
+    what = "hardware " if hardware_only else ""
+    raise PipelineError(f"no recorded certified {what}{service} run to replay. "
+                        + ("Record one with scripts/submit.py first." if hardware_only
+                           else "Run in sim mode (or record hardware) first."), 404)
+
+
+def _replay_into(service: str, d, src_id: str) -> dict:
+    """Copy a recorded certified run's bits into run dir d. The run keeps pointing at the original."""
+    try:
+        sd = store.run_dir(service, src_id)
+        meta = store.read_json(sd, "job_meta.json")
+        bits = store.read_json(sd, "bitstrings.json")
+        cert = store.read_json(sd, "certificate.json")
+    except (FileNotFoundError, ValueError):
+        raise PipelineError(f"source run {src_id!r} not found", 404)
+    if not cert["certified"]:
+        raise PipelineError("cannot replay a blocked run", 400)
+    meta = {**meta, "replay_of": meta.get("replay_of") or src_id}   # always point at the original run
+    meta.pop("live_attempt", None)
+    store.write_json(d, "job_meta.json", meta)
+    store.write_json(d, "bitstrings.json", bits)
+    return meta
+
+
+def _try_live(service: str, d, shots: int) -> tuple[dict | None, dict]:
+    """Attempt a live run. Returns (meta, attempt). meta is None when we must fall back, with attempt['reason']."""
+    global _live_used
+    cfg = live_config()
+    att = {"outcome": "fallback", "reason": None, "pending": None, "backend": None}
+    if _live_used >= cfg["max_jobs"]:
+        att["reason"] = f"live job cap reached ({cfg['max_jobs']}), protecting the QPU allowance"
+        return None, att
+    if not _live_lock.acquire(blocking=False):
+        att["reason"] = "another live run is in progress"
+        return None, att
+    try:
+        probe = hardware.live_probe_safe(cfg["probe_timeout"])
+        if not probe["ok"]:
+            att["reason"] = f"cannot reach IBM ({probe['error']})"
+            return None, att
+        att.update(pending=probe["pending"], backend=probe["backend"])
+        if probe["pending"] > cfg["max_pending"]:
+            att["reason"] = f"{probe['pending']} jobs queued on {probe['backend']} (limit {cfg['max_pending']})"
+            return None, att
+        try:
+            _live_used += 1
+            hardware.submit_job(d, shots, True, probe["spec"])
+            res = hardware.wait_for_job(d, cfg["queue_timeout"])
+            if res == "done":
+                meta = hardware.collect_job(d)
+                meta["live_attempt"] = {**att, "outcome": "live", "reason": None}
+                store.write_json(d, "job_meta.json", meta)
+                return meta, meta["live_attempt"]
+            att["reason"] = (f"job still queued after {cfg['queue_timeout']:g}s, cancelled" if res == "timeout"
+                             else f"hardware job ended with {res}")
+        except Exception as e:
+            att["reason"] = f"live submission failed ({hardware._scrub(f'{type(e).__name__}: {e}')})"
+        return None, att
+    finally:
+        _live_lock.release()
 
 
 def acquire_bits(service: str, run_id: str, mode: str, shots: int, source_run: str | None, backend: str):
-    """Produce bitstrings.json + job_meta.json for a run (simulator, control, classical or replay)."""
+    """Produce bitstrings.json + job_meta.json for a run (simulator, control, classical, replay or live)."""
     d = store.run_dir(service, run_id)
     if mode == "replay":
-        src_id = source_run or _latest_source(service)
+        return _replay_into(service, d, source_run or _latest_source(service))
+    if mode == "live":
+        meta, att = _try_live(service, d, shots)
+        if meta is not None:
+            return meta
+        for stale in ("_local_bits.json", "bitstrings.json"):
+            (d / stale).unlink(missing_ok=True)
         try:
-            sd = store.run_dir(service, src_id)
-            meta = store.read_json(sd, "job_meta.json")
-            bits = store.read_json(sd, "bitstrings.json")
-            cert = store.read_json(sd, "certificate.json")
-        except (FileNotFoundError, ValueError):
-            raise PipelineError(f"source run {src_id!r} not found", 404)
-        if not cert["certified"]:
-            raise PipelineError("cannot replay a blocked run", 400)
-        meta = {**meta, "replay_of": meta.get("replay_of") or src_id}   # always point at the original run
+            src_id = _latest_source(service, hardware_only=True)
+        except PipelineError as e:
+            raise PipelineError(f"live hardware unavailable ({att['reason']}) and no recorded hardware run to fall "
+                                f"back to for {service}", 503) from e
+        meta = _replay_into(service, d, src_id)
+        meta["live_attempt"] = att
+        store.write_json(d, "job_meta.json", meta)
+        return meta
+    if mode == "sim":
+        bits, info = hardware.run_sim(shots, True, backend)
+        src = "sim"
+    elif mode == "control":
+        bits, info = hardware.run_sim(shots, False, backend)
+        src = "control-sim"
+    elif mode == "classical":
+        bits, info = hardware.run_classical(shots)
+        src = "classical"
     else:
-        if mode == "sim":
-            bits, info = hardware.run_sim(shots, True, backend)
-            src = "sim"
-        elif mode == "control":
-            bits, info = hardware.run_sim(shots, False, backend)
-            src = "control-sim"
-        elif mode == "classical":
-            bits, info = hardware.run_classical(shots)
-            src = "classical"
-        else:
-            raise PipelineError(f"mode must be one of {MODES}", 422)
-        meta = {**info, "job_id": f"{src.upper()}-{secrets.token_hex(4).upper()}", "source": src,
-                "submitted": _now(), "finished": _now(), "circuits": chsh.SETTING_NAMES}
+        raise PipelineError(f"mode must be one of {MODES}", 422)
+    meta = {**info, "job_id": f"{src.upper()}-{secrets.token_hex(4).upper()}", "source": src,
+            "submitted": _now(), "finished": _now(), "circuits": chsh.SETTING_NAMES}
     store.write_json(d, "job_meta.json", meta)
     store.write_json(d, "bitstrings.json", bits)
     return meta
@@ -129,7 +212,7 @@ def finalize_run(service: str, run_id: str) -> tuple[dict, object]:
                         [ph, seed_hash, result_hash])
     receipt = {"run_id": run_id, "service": service, "scenario": label, "status": stored["status"],
                "certified": cert["certified"], "source": meta["source"], "backend": meta.get("backend"),
-               "job_id": meta.get("job_id"), "replay_of": meta.get("replay_of"), "params_hash": ph,
+               "job_id": meta.get("job_id"), "replay_of": meta.get("replay_of"), "live_attempt": meta.get("live_attempt"), "params_hash": ph,
                "S": cert["S"], "sigma": cert["sigma"], "lower_bound": cert["lower_bound"], "seed_hash": seed_hash,
                "result_hash": result_hash, "ledger_hash": rec["hash"], "ledger_prev_hash": rec["prev_hash"],
                "finalized": _now(), "badge": badge(meta), "limits": svc.LIMITS}
@@ -143,7 +226,7 @@ def start_draw(service: str, params: dict, mode: str = "sim", scenario: str = "d
         raise PipelineError(f"mode must be one of {MODES}", 422)
     if not 64 <= shots <= 8192:
         raise PipelineError("shots per setting must be between 64 and 8192", 422)
-    return commit_run(service, params, scenario, source={"control": "control-sim"}.get(mode, mode))[0]
+    return commit_run(service, params, scenario, source={"control": "control-sim", "live": "hardware"}.get(mode, mode))[0]
 
 
 def complete_draw(service: str, run_id: str, mode: str = "sim", shots: int = 1024,

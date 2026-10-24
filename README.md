@@ -118,6 +118,26 @@ frontend/
   ui/                    theme, components, API client
 ```
 
+## Live hardware with a replay fallback
+
+The four services (IPO, Web3, Lottery, Keys) can take their randomness from five sources, chosen on each page:
+
+| Mode | What happens | Badge |
+|---|---|---|
+| **Live** | If IBM is reachable and no jobs are queued, the CHSH circuits run on real hardware. Otherwise the draw uses the saved hardware run, and says why. | `HARDWARE (live)`, or `HARDWARE (recorded)` plus the reason |
+| Replay | Re-runs the service on a saved run's bits (instant, works offline) | `HARDWARE (recorded)` / `SIMULATOR (replayed)` |
+| Simulator | Fresh Aer run | `SIMULATOR` |
+| Control | Simulator with no entanglement; must be blocked | `SIMULATOR (control, no entanglement)` |
+| Classical | The rigged device; must be blocked | `CLASSICAL` |
+
+Rules: a fallback is never labelled live; a live run that fails the Bell test is shown as BLOCKED (no swapping in a nicer saved run); a queued live job is cancelled after `LIVE_QUEUE_TIMEOUT` seconds and the saved run is used.
+
+Settings (environment variables, or `.env`): `PROVAFAIR_MODE=live` to make Live the default, `LIVE_MAX_PENDING` (default 0 queued jobs), `LIVE_QUEUE_TIMEOUT` (30 s), `LIVE_PROBE_TIMEOUT` (15 s), `LIVE_MAX_JOBS` (25 live jobs per server run, protects the QPU allowance), `PROVAFAIR_LIVE_BACKEND=fake:FakeKingston` to rehearse live mode on a local noisy fake without touching IBM.
+
+Credentials: your IBM key lives in `.env` as `API_KEY` and is saved once with `QiskitRuntimeService.save_account(..., name="open")`. ProvaFair's own login key is `PROVAFAIR_API_KEY`.
+
+Before the event, run `python backend/scripts/live_check.py` (read-only, no QPU time). It reports whether live is usable right now and whether every service has a saved hardware run to fall back to. Record runs with `scripts/submit.py --backend open` then `scripts/collect.py`.
+
 ## How the physics works
 
 - **Bell pair:** a Hadamard gate puts qubit 0 in a 50/50 superposition, and a CNOT entangles qubit 1 with it. Without entanglement, the CHSH score can't exceed 2.
