@@ -11,8 +11,9 @@ from ledger.audit_db import count_recent_requests, log_api_request
 
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-# API_KEY from .env / environment. PROVA_API_KEY and the old demo key remain as fallbacks.
-PROVA_API_KEY = os.getenv("API_KEY") or os.getenv("PROVA_API_KEY") or "PROVA-HACK-2026"
+# PROVAFAIR_API_KEY from .env / environment (API_KEY is NOT used: that name holds the IBM Quantum token).
+# PROVA_API_KEY and the old demo key remain as fallbacks.
+PROVA_API_KEY = os.getenv("PROVAFAIR_API_KEY") or os.getenv("PROVA_API_KEY") or "PROVA-HACK-2026"
 
 _lock = threading.Lock()
 

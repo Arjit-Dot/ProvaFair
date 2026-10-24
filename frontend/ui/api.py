@@ -6,7 +6,7 @@ import streamlit as st
 
 
 def _load_env():
-    """Read API_KEY from the repo-root .env (real environment variables win)."""
+    """Read PROVAFAIR_API_KEY from the repo-root .env (real environment variables win)."""
     f = Path(__file__).resolve().parents[2] / ".env"
     if f.is_file():
         for line in f.read_text(encoding="utf-8-sig").splitlines():
@@ -16,7 +16,7 @@ def _load_env():
 
 
 _load_env()
-API_KEY = os.getenv("API_KEY") or os.getenv("PROVA_API_KEY") or "PROVA-HACK-2026"
+API_KEY = os.getenv("PROVAFAIR_API_KEY") or os.getenv("PROVA_API_KEY") or "PROVA-HACK-2026"
 
 API_URL = "http://127.0.0.1:8000"
 
