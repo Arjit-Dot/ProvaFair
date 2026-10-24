@@ -178,6 +178,7 @@ MODE_PREVIEW = {
     "control": {"text": "SIMULATOR (control, no entanglement)", "tone": "sim"},
     "classical": {"text": "CLASSICAL", "tone": "classical"},
     "replay": {"text": "REPLAY of a recorded run", "tone": "sim"},
+    "live": {"text": "LIVE hardware if no queue, else RECORDED run", "tone": "hardware"},
 }
 
 
@@ -187,8 +188,24 @@ def mode_badge(b, note=""):
     if b.get("replayed") and b.get("replay_of"):
         bits.append(f"replay of {b['replay_of']}")
     meta = " | ".join(bits) or note
+    extra = f'<div class="pf-banner bad" style="margin:0 0 .6rem">{e(b["note"])}</div>' if b.get("note") else ""
     return (f'<div class="pf-modebar"><span class="pf-badge {e(b["tone"])}">{e(b["text"])}</span>'
-            f'<span class="pf-note">{e(meta)}</span></div>')
+            f'<span class="pf-note">{e(meta)}</span></div>{extra}')
+
+
+def live_status_html(st):
+    """One line above the Run button: will 'Live' hit hardware right now, or fall back?"""
+    if not st:
+        return ""
+    if st["live_usable"]:
+        txt = f'Live is available now: {e(st["backend"])}, {st["pending"]} jobs queued. The next live draw runs on hardware.'
+        cls = "ok"
+    else:
+        fb = ("saved hardware runs are ready for every service" if st["can_fall_back"]
+              else "WARNING: some services have no saved hardware run to fall back to")
+        txt = f'Live is not available now ({e(st["reason"] or "unknown")}). A live draw will use the saved run: {fb}.'
+        cls = "ok" if st["can_fall_back"] else "bad"
+    return f'<div class="pf-banner {cls}" style="margin:.2rem 0 .6rem">{txt}</div>'
 
 
 def checks_html(v, start=0):

@@ -94,7 +94,7 @@ class PipelineTests(helpers.Isolated, unittest.TestCase):
             pipeline.draw("ipo", {}, "replay", source_run=blocked)
 
     def test_invalid_inputs(self):
-        for kw, status in (({"params": {"lot_size": 0}}, 422), ({"shots": 10}, 422), ({"mode": "live"}, 422)):
+        for kw, status in (({"params": {"lot_size": 0}}, 422), ({"shots": 10}, 422), ({"mode": "bogus"}, 422)):
             with self.assertRaises(pipeline.PipelineError) as cm:
                 pipeline.draw("ipo", kw.get("params", {}), kw.get("mode", "sim"), shots=kw.get("shots", 256))
             self.assertEqual(cm.exception.status, status)

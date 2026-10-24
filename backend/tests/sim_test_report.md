@@ -131,3 +131,8 @@ Run: `cd backend && python -m pytest tests/test_core.py tests/test_services.py t
 - UiTests / test_ui_hides_nothing_when_backend_down
 - UiTests / test_verify_page_lists_runs_and_verifies
 - UiTests / test_verify_page_unknown_run_shows_error
+
+
+## Addendum: live mode with replay fallback (tests: 22 in test_live.py, 1 in test_ui.py)
+All with fakes, no IBM call. Covered: live runs when the queue is empty; queue over the limit -> saved hardware run, nothing submitted, reason shown; IBM unreachable or slow -> fallback, probe never raises or hangs, token never appears in an error; queued job cancelled after the timeout; failed/erroring hardware job -> fallback; submit exception -> fallback; no saved hardware run -> clear 503 and no stray run (a simulator recording is not an acceptable fallback); job cap; one live run at a time; a live result that fails the Bell test stays BLOCKED; parameters committed to the ledger before any live attempt; fallbacks are never labelled live; `/v3/live/status`; live as default mode; live page in the console.
+Total after the addendum: 113 tests passing.

@@ -28,7 +28,8 @@ class UiTests(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="pf-ui-")
         s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
         env = {**os.environ, "PROVAFAIR_DATA": f"{cls.tmp}/runs", "PROVAFAIR_LEDGER_DB": f"{cls.tmp}/chain.db",
-               "DATABASE_URL": f"sqlite:///{cls.tmp}/audit.db"}
+               "DATABASE_URL": f"sqlite:///{cls.tmp}/audit.db",
+               "PROVAFAIR_LIVE_BACKEND": "fake:FakeKingston"}   # live mode runs on a local noisy fake, no IBM call
         cls.proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--port", str(port)],
                                     cwd=helpers.BACKEND, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cls.url = f"http://127.0.0.1:{port}"
@@ -84,6 +85,18 @@ class UiTests(unittest.TestCase):
             text = md(at)
             self.assertIn("All 5 checks passed", text, key)
             self.assertEqual(text.count("pf-check ok"), 5, key)
+
+    def test_live_mode_in_ui_shows_status_and_live_badge(self):
+        at = self.page("lottery.py")
+        at.radio(key="lottery_mode").set_value("live")
+        at.run()
+        self.assertIn("Live is available now", md(at))
+        at.button(key="lottery_run").click()
+        at.run()
+        self.assertFalse(at.exception, [e.value for e in at.exception])
+        text = md(at)
+        self.assertIn("SIMULATOR (live, fake backend)", text)
+        self.assertIn("DRAW CERTIFIED", text)
 
     def test_classical_and_control_show_blocked_and_no_output(self):
         for mode, badge in (("classical", "CLASSICAL"), ("control", "control, no entanglement")):

@@ -29,7 +29,7 @@ class ApiTests(helpers.Isolated, unittest.TestCase):
     def test_mode_and_services_endpoints(self):
         m = self.c.get("/v3/mode").json()
         self.assertEqual(m["default"], "sim")
-        self.assertEqual(set(m["modes"]), {"sim", "control", "classical", "replay"})
+        self.assertEqual(set(m["modes"]), {"sim", "control", "classical", "replay", "live"})
         s = self.c.get("/v3/services").json()
         self.assertEqual(set(s), set(SERVICES))
         self.assertTrue(all(v["limits"] and v["defaults"] for v in s.values()))
@@ -68,7 +68,7 @@ class ApiTests(helpers.Isolated, unittest.TestCase):
     def test_error_codes(self):
         self.assertEqual(self.draw("ipo", params={"lot_size": 0}).status_code, 422)
         self.assertEqual(self.draw("ipo", shots=10).status_code, 422)
-        self.assertEqual(self.draw("ipo", mode="live").status_code, 422)
+        self.assertEqual(self.draw("ipo", mode="bogus").status_code, 422)
         self.assertEqual(self.draw("bogus").status_code, 404)
         self.assertEqual(self.c.get("/v3/bogus/runs").status_code, 404)
         self.assertEqual(self.c.get("/v3/ipo/runs/IPO-nope").status_code, 404)

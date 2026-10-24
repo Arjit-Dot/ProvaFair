@@ -7,7 +7,9 @@ import threading
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from core import pipeline, store
+import time
+
+from core import hardware, pipeline, store
 from ledger.audit_db import get_idempotency_record, save_idempotency_record
 from security import verify_api_key_v3
 from services import REGISTRY
@@ -20,7 +22,7 @@ DEFAULT_MODE = os.getenv("PROVAFAIR_MODE", "sim")
 
 class DrawBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
-    mode: Optional[Literal["sim", "control", "classical", "replay"]] = None
+    mode: Optional[Literal["sim", "control", "classical", "replay", "live"]] = None
     scenario: str = "default"
     shots: int = Field(1024, ge=64, le=8192)
     source_run: Optional[str] = None
@@ -43,7 +45,32 @@ def mode():
                 "sim": "Fresh Aer simulator run (labelled SIMULATOR)",
                 "control": "Simulator with no entanglement: the rigged-device control, must be blocked",
                 "classical": "Seeded classical generator (labelled CLASSICAL), must be blocked",
-                "replay": "Re-run the service on a recorded run's bits (labelled as recorded/replayed, never live)"}}
+                "replay": "Re-run the service on a recorded run's bits (labelled as recorded/replayed, never live)",
+                "live": "Run on real hardware if there is no queue, otherwise fall back to the saved hardware run "
+                        "(labelled HARDWARE (live) or HARDWARE (recorded) with the reason)"}}
+
+
+_live_cache: dict = {"at": 0.0, "val": None}
+
+
+@router.get("/live/status")
+def live_status():
+    """Is live hardware usable right now, and can every service fall back to a saved run? (cached 15 s)"""
+    if _live_cache["val"] is None or time.time() - _live_cache["at"] > 15:
+        cfg = pipeline.live_config()
+        probe = hardware.live_probe_safe(cfg["probe_timeout"])
+        recorded = {k: sum(1 for r in store.list_runs(k) if r["certified"] and r["source"] == "hardware"
+                           and not r["replay_of"]) for k in REGISTRY}
+        usable = bool(probe["ok"] and probe["pending"] <= cfg["max_pending"] and cfg["used"] < cfg["max_jobs"])
+        reason = (None if usable else probe.get("error") or (
+            f"{probe['pending']} jobs queued on {probe['backend']} (limit {cfg['max_pending']})" if probe["ok"]
+            else None) or f"live job cap reached ({cfg['max_jobs']})")
+        _live_cache.update(at=time.time(), val={
+            "target": hardware.live_spec(), "backend": probe.get("backend"), "pending": probe.get("pending"),
+            "reachable": probe["ok"], "live_usable": usable, "reason": reason,
+            "recorded_hardware_runs": recorded, "can_fall_back": all(v > 0 for v in recorded.values()),
+            "config": cfg})
+    return _live_cache["val"]
 
 
 @router.get("/services")

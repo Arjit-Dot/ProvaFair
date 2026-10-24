@@ -40,3 +40,9 @@ def call(method: str, path: str, timeout: int = 90, **kw):
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_get(path: str):
     return call("GET", path)
+
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def cached_get_short(path: str):
+    return call("GET", path)
