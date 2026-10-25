@@ -26,8 +26,7 @@ ProvaFair/
 ├── requirements.txt                       # Project dependencies (FastAPI, Qiskit, SQLAlchemy, Streamlit, etc.)
 ├── start.sh                               # Container entrypoint script
 ├── app.py                                 # Root Streamlit redirector (delegates execution to frontend/app.py)
-├── projectstate.md                        # Up-to-date system state and technical specification
-├── project_state.md                       # Synchronized architectural documentation
+├── project_state.md                       # Living architectural specification
 ├── chain_ledger.db                        # SQLite database storing tamper-evident hash-chain ledger
 ├── backend/
 │   ├── main.py                            # Primary FastAPI application, security, idempotency, and root routes
