@@ -1,11 +1,11 @@
 """Shared layout for the four service pages: mode selector, parameter form, run, result, verify."""
 import streamlit as st
 from ui import api
-from ui.components import MODE_PREVIEW, empty_panel, error_panel, live_status_html, mode_badge, panel, result_inner
+from ui.components import empty_panel, error_panel, panel, result_inner
 
 H = 760
-MODES = {"retrieve": "Retrieve from IBM (pre-submitted job)", "live": "Live (falls back to recorded)", "replay": "Replay recorded run", "sim": "Simulator",
-         "control": "Control (no entanglement)", "classical": "Classical (rigged)"}
+# the one demo action: "Run Live" fetches the saved IBM hardware job from IBM by its
+# job ID, and falls back to the saved copy of the same job when IBM is busy or unreachable (shown in the badge).
 
 
 def render(service: str, intro: str, form):
@@ -18,40 +18,16 @@ def render(service: str, intro: str, form):
 
     with st.expander("Parameters", expanded=True):
         params = form()
-    c1, c2, c3, c4 = st.columns([2.4, 1.6, 1.2, 1])
-    info, _ = api.cached_get("/v3/mode")
-    default = (info or {}).get("default", "sim")
-    with c1:
-        mode = st.radio("Source of randomness", list(MODES), index=list(MODES).index(default) if default in MODES else 0,
-                        format_func=MODES.get, horizontal=True, key=k("mode"))
-    with c2:
-        scenario = st.text_input("Scenario label", "default", key=k("scenario"),
-                                 help="Changes the seed derivation, so one recorded run can show several scenarios.")
-    with c3:
-        shots = st.select_slider("Shots per setting", [256, 512, 1024, 2048, 4096], 1024, key=k("shots"))
-    with c4:
-        st.write("")
-        run = st.button("Run draw", type="primary", key=k("run"))
-
-    prev = MODE_PREVIEW[mode]
-    st.markdown(mode_badge({"text": prev["text"], "tone": prev["tone"]},
-                           "selected source (the result shows the verified badge)"), unsafe_allow_html=True)
-    if mode == "retrieve":
-        st.markdown('<div class="pf-banner ok" style="margin:.2rem 0 .6rem">Fetches the finished hardware job from IBM '
-                    "by its saved job ID, cross-checks it against the saved copy, then runs the whole service live on "
-                    "those bits. Nothing is submitted. If IBM is unreachable it uses the saved copy and says so.</div>",
-                    unsafe_allow_html=True)
-    if mode == "live":
-        live, _ = api.cached_get_short("/v3/live/status")
-        st.markdown(live_status_html(live), unsafe_allow_html=True)
+    mode = "retrieve" if st.button("Run Live", type="primary", use_container_width=True, key=k("retrieve")) else None
+    run = mode is not None
     slot = st.empty()
 
     if run:
         slot.markdown(empty_panel("Running circuits, checking the Bell inequality, then the service", True, H),
                       unsafe_allow_html=True)
         data, err = api.call("POST", f"/v3/{service}/draw", json={
-            "params": params, "mode": mode, "scenario": scenario or "default", "shots": int(shots)},
-            timeout=180 if mode in ("live", "retrieve") else 90)
+            "params": params, "mode": mode, "scenario": "default", "shots": 1024},
+            timeout=90)
         ss[k("res")], ss[k("err")], ss[k("ver")], ss[k("fresh")] = data, err, None, data is not None
 
     if ss[k("err")]:
